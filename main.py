@@ -11,7 +11,7 @@ from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 import mcp.types as types
 
-# 로그 설정 (Render 로그에서 확인하기 위함)
+# 로그 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("t3xtart")
 
@@ -21,10 +21,10 @@ KAKAO_TOKEN = os.environ.get("KAKAO_TOKEN")
 # 2. 서버 초기화
 app = FastAPI()
 
-# ✅ [핵심 추가] CORS 설정 (이게 없으면 거절당할 수 있음)
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 모든 곳에서의 접속 허용
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,7 +32,7 @@ app.add_middleware(
 
 mcp_server = Server("t3xtart-delivery-service")
 
-# 3. 도구 정의 (기존과 동일)
+# 3. 도구 정의 (SSE 연결용)
 @mcp_server.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
@@ -81,7 +81,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text=f"❌ 에러: {str(e)}")]
 
 # =================================================================
-# 4. SSE 및 검증 로직 (CORS 및 ID 처리 강화)
+# 4. SSE 및 검증 로직 (여기가 중요합니다!)
 # =================================================================
 sse_transport = None
 
@@ -98,39 +98,56 @@ async def handle_sse(request: Request):
             )
     return StreamingResponse(stream(), media_type="text/event-stream")
 
-# ✅ [핵심 수정] PlayMCP 검증을 위한 수동 핸들러
 @app.post("/sse")
 async def handle_sse_validation(request: Request):
     try:
         body = await request.json()
-        logger.info(f"POST /sse 요청 수신: {body}") # 로그에 요청 내용 찍기
+        logger.info(f"POST /sse 요청 수신: {body}")
     except:
-        logger.info("POST /sse 요청 수신 (Body 없음)")
         return JSONResponse(content={"status": "ok"})
 
-    # PlayMCP가 보낸 ID를 그대로 따서 돌려줘야 함 (중요!)
+    method = body.get("method")
     request_id = body.get("id")
-    
-    if body.get("method") == "initialize":
-        response_data = {
+
+    # 1. 초기화 요청 (initialize)
+    if method == "initialize":
+        return JSONResponse(content={
             "jsonrpc": "2.0",
-            "id": request_id,  # 요청받은 ID 그대로 반환
+            "id": request_id,
             "result": {
                 "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {},
-                    "prompts": {},   # 빈 값이라도 넣어주는 게 안전
-                    "resources": {}  # 빈 값이라도 넣어주는 게 안전
-                },
-                "serverInfo": {
-                    "name": "t3xtart-delivery-service",
-                    "version": "1.0"
-                }
+                "capabilities": {"tools": {}, "prompts": {}, "resources": {}},
+                "serverInfo": {"name": "t3xtart-delivery-service", "version": "1.0"}
             }
-        }
-        return JSONResponse(content=response_data)
+        })
     
-    # initialize가 아닌 다른 ping 등의 요청일 경우
+    # 2. 도구 목록 요청 (tools/list) - 여기가 핵심 수정 사항입니다!
+    if method == "tools/list":
+        return JSONResponse(content={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "deliver_kakao_message",
+                        "description": "완성된 텍스트 메시지나 이모지 아트를 입력받아 사용자의 카카오톡으로 전송합니다.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string", "description": "전송할 전체 메시지 내용"}
+                            },
+                            "required": ["content"]
+                        }
+                    }
+                ]
+            }
+        })
+
+    # 3. 기타 알림 (notifications/initialized 등)
+    if method == "notifications/initialized":
+        return JSONResponse(content={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+
+    # 4. 그 외 요청 (ping 등)
     return JSONResponse(content={
         "jsonrpc": "2.0",
         "id": request_id,

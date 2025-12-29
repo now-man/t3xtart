@@ -18,7 +18,6 @@ logger = logging.getLogger("t3xtart")
 # 1. 환경 변수
 KAKAO_TOKEN = os.environ.get("KAKAO_TOKEN")
 
-# 2. 서버 초기화
 app = FastAPI()
 
 # CORS 설정
@@ -32,17 +31,34 @@ app.add_middleware(
 
 mcp_server = Server("t3xtart-delivery-service")
 
-# 3. 도구 정의 (SSE 연결용)
+# ---------------------------------------------------------
+# 🎨 [핵심 수정] 도구 설명에 '강력한 지시사항'을 포함시켰습니다.
+# ---------------------------------------------------------
+TOOL_DESCRIPTION = """
+이 도구는 단순한 텍스트 전송기가 아닙니다. 당신은 '이모지 그리드 아티스트'입니다.
+사용자의 요청(예: "나뭇잎 원숭이")을 받으면, 반드시 다음 규칙을 따라 'content'를 생성하세요:
+
+1. [캔버스] 10x10 ~ 12x12 크기의 이모지 그리드(Grid)를 마음속으로 그리세요.
+2. [채우기] 빈 공간은 배경색 이모지(⬜, ⬛, ☁️, 🟦 등)로 꽉 채우세요.
+3. [그리기] 주제(원숭이, 케이크 등)를 돋보이는 색상의 이모지로 중앙에 배치하세요.
+4. [전송] 완성된 그리드 아트 문자열을 이 도구의 'content' 인자로 전달하세요.
+
+(주의: 텍스트 설명보다 이모지 그림이 메인이 되어야 합니다.)
+"""
+
 @mcp_server.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="deliver_kakao_message",
-            description="완성된 텍스트 메시지나 이모지 아트를 입력받아 사용자의 카카오톡으로 전송합니다.",
+            description=TOOL_DESCRIPTION, # 수정된 설명 적용
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "전송할 전체 메시지 내용"}
+                    "content": {
+                        "type": "string",
+                        "description": "완성된 이모지 그리드 아트 및 메시지 내용"
+                    }
                 },
                 "required": ["content"]
             }
@@ -54,35 +70,41 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name != "deliver_kakao_message":
         raise ValueError(f"Unknown tool: {name}")
 
-    if not KAKAO_TOKEN:
-        return [types.TextContent(type="text", text="❌ 서버 오류: 카카오 토큰 설정 안됨")]
+    # 토큰 확인 (매 호출마다 환경변수 다시 확인)
+    current_token = os.environ.get("KAKAO_TOKEN")
+    if not current_token:
+        return [types.TextContent(type="text", text="❌ 서버 오류: KAKAO_TOKEN 환경변수가 없습니다.")]
 
     message_content = arguments.get("content")
-    final_text = f"🎨 [t3xtart] 작품 도착!\n\n{message_content}\n\n(t3xtart AI 생성)"
+    
+    # 메시지 전송 로직
+    final_text = f"{message_content}\n\n🎨 t3xtart AI Generated"
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    headers = {"Authorization": f"Bearer {KAKAO_TOKEN}"}
+    headers = {"Authorization": f"Bearer {current_token}"}
     payload = {
         "template_object": json.dumps({
             "object_type": "text",
             "text": final_text,
             "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
-            "button_title": "앱 열기"
+            "button_title": "자세히 보기"
         })
     }
     
     try:
         res = requests.post(url, headers=headers, data=payload)
         if res.status_code == 200:
-            return [types.TextContent(type="text", text="✅ 전송 완료")]
+            return [types.TextContent(type="text", text="✅ 전송 성공! 멋진 작품이네요.")]
+        elif res.status_code == 401:
+             return [types.TextContent(type="text", text="❌ 전송 실패: 카카오 토큰이 만료되었습니다. 개발자에게 토큰 갱신을 요청하세요.")]
         else:
-            return [types.TextContent(type="text", text=f"❌ 실패: {res.text}")]
+            return [types.TextContent(type="text", text=f"❌ 카카오 에러 ({res.status_code}): {res.text}")]
     except Exception as e:
-        return [types.TextContent(type="text", text=f"❌ 에러: {str(e)}")]
+        return [types.TextContent(type="text", text=f"❌ 서버 내부 에러: {str(e)}")]
 
-# =================================================================
-# 4. SSE 및 검증 로직 (여기가 중요합니다!)
-# =================================================================
+# ---------------------------------------------------------
+# SSE 및 검증 핸들러
+# ---------------------------------------------------------
 sse_transport = None
 
 @app.get("/sse")
@@ -102,14 +124,13 @@ async def handle_sse(request: Request):
 async def handle_sse_validation(request: Request):
     try:
         body = await request.json()
-        logger.info(f"POST /sse 요청 수신: {body}")
     except:
         return JSONResponse(content={"status": "ok"})
 
     method = body.get("method")
     request_id = body.get("id")
 
-    # 1. 초기화 요청 (initialize)
+    # 1. initialize
     if method == "initialize":
         return JSONResponse(content={
             "jsonrpc": "2.0",
@@ -121,7 +142,7 @@ async def handle_sse_validation(request: Request):
             }
         })
     
-    # 2. 도구 목록 요청 (tools/list) - 여기가 핵심 수정 사항입니다!
+    # 2. tools/list (여기도 바뀐 설명이 나가도록 수정)
     if method == "tools/list":
         return JSONResponse(content={
             "jsonrpc": "2.0",
@@ -130,11 +151,11 @@ async def handle_sse_validation(request: Request):
                 "tools": [
                     {
                         "name": "deliver_kakao_message",
-                        "description": "완성된 텍스트 메시지나 이모지 아트를 입력받아 사용자의 카카오톡으로 전송합니다.",
+                        "description": TOOL_DESCRIPTION, # 위에서 정의한 강력한 설명 사용
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "content": {"type": "string", "description": "전송할 전체 메시지 내용"}
+                                "content": {"type": "string", "description": "완성된 이모지 그리드 아트"}
                             },
                             "required": ["content"]
                         }
@@ -143,11 +164,7 @@ async def handle_sse_validation(request: Request):
             }
         })
 
-    # 3. 기타 알림 (notifications/initialized 등)
-    if method == "notifications/initialized":
-        return JSONResponse(content={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
-
-    # 4. 그 외 요청 (ping 등)
+    # 중요: tools/call 등 다른 요청은 여기서 처리하지 않고 패스해야 함 (빈값 리턴)
     return JSONResponse(content={
         "jsonrpc": "2.0",
         "id": request_id,

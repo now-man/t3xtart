@@ -1,18 +1,35 @@
 import os
 import json
+import logging
 import requests
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 import mcp.types as types
+
+# 로그 설정 (Render 로그에서 확인하기 위함)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("t3xtart")
 
 # 1. 환경 변수
 KAKAO_TOKEN = os.environ.get("KAKAO_TOKEN")
 
 # 2. 서버 초기화
 app = FastAPI()
+
+# ✅ [핵심 추가] CORS 설정 (이게 없으면 거절당할 수 있음)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 곳에서의 접속 허용
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 mcp_server = Server("t3xtart-delivery-service")
 
 # 3. 도구 정의 (기존과 동일)
@@ -25,10 +42,7 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "전송할 전체 메시지 내용"
-                    }
+                    "content": {"type": "string", "description": "전송할 전체 메시지 내용"}
                 },
                 "required": ["content"]
             }
@@ -41,14 +55,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         raise ValueError(f"Unknown tool: {name}")
 
     if not KAKAO_TOKEN:
-        return [types.TextContent(type="text", text="❌ 서버 오류: 카카오 토큰이 설정되지 않았습니다.")]
+        return [types.TextContent(type="text", text="❌ 서버 오류: 카카오 토큰 설정 안됨")]
 
     message_content = arguments.get("content")
-    final_text = f"🎨 [t3xtart] 작품이 도착했습니다!\n\n{message_content}\n\n(t3xtart AI가 생성함)"
+    final_text = f"🎨 [t3xtart] 작품 도착!\n\n{message_content}\n\n(t3xtart AI 생성)"
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {"Authorization": f"Bearer {KAKAO_TOKEN}"}
-    
     payload = {
         "template_object": json.dumps({
             "object_type": "text",
@@ -61,14 +74,14 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     try:
         res = requests.post(url, headers=headers, data=payload)
         if res.status_code == 200:
-            return [types.TextContent(type="text", text="✅ 카카오톡 전송 완료")]
+            return [types.TextContent(type="text", text="✅ 전송 완료")]
         else:
-            return [types.TextContent(type="text", text=f"❌ 전송 실패: {res.text}")]
+            return [types.TextContent(type="text", text=f"❌ 실패: {res.text}")]
     except Exception as e:
-        return [types.TextContent(type="text", text=f"❌ 전송 중 에러 발생: {str(e)}")]
+        return [types.TextContent(type="text", text=f"❌ 에러: {str(e)}")]
 
 # =================================================================
-# 4. SSE 및 검증 로직 (여기가 수정되었습니다!)
+# 4. SSE 및 검증 로직 (CORS 및 ID 처리 강화)
 # =================================================================
 sse_transport = None
 
@@ -85,26 +98,29 @@ async def handle_sse(request: Request):
             )
     return StreamingResponse(stream(), media_type="text/event-stream")
 
+# ✅ [핵심 수정] PlayMCP 검증을 위한 수동 핸들러
 @app.post("/sse")
 async def handle_sse_validation(request: Request):
-    """
-    PlayMCP 검증 봇이 POST로 'initialize' 요청을 보낼 때
-    정식 MCP 프로토콜 규격에 맞춰서 가짜 응답을 보내줍니다.
-    """
     try:
         body = await request.json()
+        logger.info(f"POST /sse 요청 수신: {body}") # 로그에 요청 내용 찍기
     except:
-        return {"status": "ok"} # JSON이 아니면 그냥 OK
+        logger.info("POST /sse 요청 수신 (Body 없음)")
+        return JSONResponse(content={"status": "ok"})
 
-    # 만약 "initialize" 요청이라면? 정식 규격으로 대답!
+    # PlayMCP가 보낸 ID를 그대로 따서 돌려줘야 함 (중요!)
+    request_id = body.get("id")
+    
     if body.get("method") == "initialize":
-        return {
+        response_data = {
             "jsonrpc": "2.0",
-            "id": body.get("id"),
+            "id": request_id,  # 요청받은 ID 그대로 반환
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {
-                    "tools": {} # 도구가 있다는 것을 알림
+                    "tools": {},
+                    "prompts": {},   # 빈 값이라도 넣어주는 게 안전
+                    "resources": {}  # 빈 값이라도 넣어주는 게 안전
                 },
                 "serverInfo": {
                     "name": "t3xtart-delivery-service",
@@ -112,9 +128,14 @@ async def handle_sse_validation(request: Request):
                 }
             }
         }
+        return JSONResponse(content=response_data)
     
-    # 그 외의 요청(ping 등)이면 그냥 빈 값 리턴 (에러만 안 나게)
-    return {"status": "ok"}
+    # initialize가 아닌 다른 ping 등의 요청일 경우
+    return JSONResponse(content={
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {}
+    })
 
 @app.post("/messages")
 async def handle_messages(request: Request):

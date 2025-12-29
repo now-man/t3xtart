@@ -48,7 +48,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {"Authorization": f"Bearer {KAKAO_TOKEN}"}
-    
+
     payload = {
         "template_object": json.dumps({
             "object_type": "text",
@@ -57,7 +57,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "button_title": "앱 열기"
         })
     }
-    
+
     try:
         res = requests.post(url, headers=headers, data=payload)
         if res.status_code == 200:
@@ -67,7 +67,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     except Exception as e:
         return [types.TextContent(type="text", text=f"❌ 전송 중 에러 발생: {str(e)}")]
 
-# 4. SSE 엔드포인트 설정
+# 4. SSE 엔드포인트 설정 (GET은 그대로 유지)
 sse_transport = None
 
 @app.get("/sse")
@@ -82,6 +82,18 @@ async def handle_sse(request: Request):
                 streams[0], streams[1], mcp_server.create_initialization_options()
             )
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+# =================================================================
+# (POST 허용)
+# =================================================================
+@app.post("/sse")
+async def handle_sse_validation(request: Request):
+    """
+    PlayMCP가 '정보 불러오기'를 할 때 POST로 찔러보는 것을
+    에러 없이 받아주는 역할을 합니다.
+    """
+    return {"status": "ok", "message": "PlayMCP Connection Verified"}
+# =================================================================
 
 @app.post("/messages")
 async def handle_messages(request: Request):

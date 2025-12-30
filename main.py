@@ -3,6 +3,7 @@ import json
 import logging
 import requests
 import uvicorn
+import asyncio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,9 +13,6 @@ from mcp.server.sse import SseServerTransport
 # 로그 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("t3xtart")
-
-# 1. 환경 변수
-KAKAO_TOKEN = os.environ.get("KAKAO_TOKEN")
 
 app = FastAPI()
 
@@ -27,12 +25,84 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------
-# 🎨 도구 설명 및 로직 분리
-# ---------------------------------------------------------
+# =========================================================
+# 🔐 [기능 1] 카카오 토큰 자동 갱신 로직
+# =========================================================
+CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
-TOOL_DESCRIPTION = """
-당신은 '위트 있는 이모지 믹스(Mix) 아티스트'입니다. 
+def refresh_kakao_token():
+    global CURRENT_ACCESS_TOKEN
+    rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
+    refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
+    
+    if not rest_api_key or not refresh_token:
+        logger.error("토큰 갱신 실패: 환경변수 부족")
+        return False
+
+    url = "https://kauth.kakao.com/oauth/token"
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": rest_api_key,
+        "refresh_token": refresh_token
+    }
+    
+    try:
+        res = requests.post(url, data=data)
+        if res.status_code == 200:
+            new_tokens = res.json()
+            CURRENT_ACCESS_TOKEN = new_tokens.get("access_token")
+            logger.info("✅ 카카오 토큰 갱신 성공!")
+            return True
+        else:
+            logger.error(f"토큰 갱신 실패: {res.text}")
+            return False
+    except Exception as e:
+        logger.error(f"에러: {e}")
+        return False
+
+async def send_kakao_logic(content: str):
+    global CURRENT_ACCESS_TOKEN
+    
+    # 토큰이 없으면 갱신 시도
+    if not CURRENT_ACCESS_TOKEN:
+        if not refresh_kakao_token():
+            return False, "토큰 발급 실패"
+
+    url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
+    
+    def try_post(token):
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "template_object": json.dumps({
+                "object_type": "text",
+                "text": f"🎨 t3xtart 작품 도착!\n\n{content}\n\n(AI Generated)",
+                "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
+                "button_title": "자세히 보기"
+            })
+        }
+        return requests.post(url, headers=headers, data=payload)
+
+    # 1차 시도
+    res = try_post(CURRENT_ACCESS_TOKEN)
+    
+    # 401(만료) 에러 -> 갱신 -> 2차 시도
+    if res.status_code == 401:
+        logger.info("토큰 만료 감지! 갱신 시도...")
+        if refresh_kakao_token():
+            res = try_post(CURRENT_ACCESS_TOKEN)
+        else:
+            return False, "토큰 갱신 실패"
+
+    if res.status_code == 200:
+        return True, "전송 성공"
+    else:
+        return False, f"카카오 에러: {res.text}"
+
+# =========================================================
+# 📝 [기능 2] 도구 설명 (심플 버전 - 비밀 숨김)
+# =========================================================
+SIMPLE_TOOL_DESCRIPTION = """
+당신은 '위트 있는 이모지 믹스(Mix) 아티스트'입니다.
 단순한 색깔 네모(🟦)로 채우는 것이 *아니라*, 사물의 의미나 모양이 유사한 이모지를 조합해서 형상을 만듭니다.
 
 [핵심 규칙]
@@ -63,38 +133,9 @@ TOOL_DESCRIPTION = """
 위 예시들처럼 이모지의 본래 모양을 활용하여 위트 있고 감각적인 아트를 생성해 'content'에 담으세요.
 """
 
-# [핵심] 카카오 전송 로직을 별도 함수로 분리했습니다.
-async def send_kakao_logic(content: str):
-    token = os.environ.get("KAKAO_TOKEN")
-    if not token:
-        return False, "서버 토큰 설정 오류"
-
-    url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    # 템플릿 구성
-    payload = {
-        "template_object": json.dumps({
-            "object_type": "text",
-            "text": f"🎨 t3xtart 작품 도착!\n\n{content}\n\n(AI Generated)",
-            "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
-            "button_title": "자세히 보기"
-        })
-    }
-    
-    try:
-        res = requests.post(url, headers=headers, data=payload)
-        if res.status_code == 200:
-            return True, "전송 성공"
-        elif res.status_code == 401:
-            return False, "토큰 만료됨 (401)"
-        else:
-            return False, f"카카오 에러: {res.text}"
-    except Exception as e:
-        return False, str(e)
 
 # ---------------------------------------------------------
-# SSE (GET) - 연결 유지용
+# 라우팅 로직
 # ---------------------------------------------------------
 sse_transport = None
 
@@ -106,32 +147,20 @@ async def handle_sse(request: Request):
         async with sse_transport.connect_sse(
             request.scope, request.receive, request._send
         ) as streams:
-            # 여기서는 빈 루프만 돌려도 연결은 유지됩니다.
-            # 실제 요청 처리는 POST에서 직접 하기 때문입니다.
             while True:
                 await asyncio.sleep(1) 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
-# ---------------------------------------------------------
-# POST 처리 (여기가 핵심입니다!)
-# ---------------------------------------------------------
-import asyncio
-
 @app.post("/sse")
 async def handle_sse_post(request: Request):
-    """
-    PlayMCP의 모든 요청(등록, 리스트, 도구 실행)을 직접 처리하는 라우터
-    """
     try:
         body = await request.json()
-        logger.info(f"요청 수신: {body}")
     except:
         return JSONResponse({"status": "error", "message": "No JSON body"})
 
     method = body.get("method")
     msg_id = body.get("id")
 
-    # 1. 초기화 (initialize)
     if method == "initialize":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -143,7 +172,6 @@ async def handle_sse_post(request: Request):
             }
         })
 
-    # 2. 도구 목록 (tools/list)
     if method == "tools/list":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -151,11 +179,11 @@ async def handle_sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "deliver_kakao_message",
-                    "description": TOOL_DESCRIPTION,
+                    "description": SIMPLE_TOOL_DESCRIPTION,
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "content": {"type": "string", "description": "생성된 이모지 아트"}
+                            "content": {"type": "string", "description": "전송할 이모지 아트 내용"}
                         },
                         "required": ["content"]
                     }
@@ -163,7 +191,6 @@ async def handle_sse_post(request: Request):
             }
         })
 
-    # 3. 도구 실행 (tools/call) - 직접 실행!
     if method == "tools/call":
         params = body.get("params", {})
         tool_name = params.get("name")
@@ -171,15 +198,10 @@ async def handle_sse_post(request: Request):
 
         if tool_name == "deliver_kakao_message":
             content = args.get("content", "")
-            
-            # 카카오 전송 실행
             success, msg = await send_kakao_logic(content)
-            
-            # 결과 구성
             result_text = "✅ 전송 성공!" if success else f"❌ 실패: {msg}"
             is_error = not success
 
-            # JSON-RPC 응답 포맷
             return JSONResponse({
                 "jsonrpc": "2.0",
                 "id": msg_id,
@@ -189,14 +211,11 @@ async def handle_sse_post(request: Request):
                 }
             })
         else:
-            # 모르는 도구일 때
             return JSONResponse({
-                "jsonrpc": "2.0", 
-                "id": msg_id, 
+                "jsonrpc": "2.0", "id": msg_id, 
                 "error": {"code": -32601, "message": "Method not found"}
             })
 
-    # 4. 기타 (ping 등)
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 
 @app.post("/messages")

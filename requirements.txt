@@ -2,3 +2,4 @@ fastapi
 uvicorn
 mcp
 requests
+google-generativeai

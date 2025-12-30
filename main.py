@@ -10,13 +10,15 @@ from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 from mcp.server.sse import SseServerTransport
 
+# ✅ Gemini 라이브러리 추가
+import google.generativeai as genai
+
 # 로그 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("t3xtart")
 
 app = FastAPI()
 
-# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,7 +28,70 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🔐 [수정됨] 비밀키(Client Secret)까지 챙기는 갱신 로직
+# 🧠 [기능 1] Gemini에게 그림 시키기 (아트 엔진)
+# =========================================================
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+
+def generate_art_with_gemini(user_prompt: str):
+    """
+    사용자의 요청(예: '라면 그려줘')을 받아 Gemini가 고퀄리티 이모지 아트를 생성합니다.
+    """
+    if not GOOGLE_API_KEY:
+        return "❌ 서버 설정 오류: GOOGLE_API_KEY가 없습니다. 기본 모드로 전환합니다."
+
+    # Gemini에게 주는 '진짜' 작업 지시서
+    system_prompt = """
+    You are a 'Pixel Emoji Artist'. convert the user's request into a 10x12 grid emoji art.
+    
+    [CRITICAL RULES]
+    1. DO NOT fill the background with the subject emoji. (e.g., Do not fill the square with 🍜).
+    2. USE COLORED BLOCKS (🟦, 🟥, 🟨, ⬜, ⬛) or specific shapes to DRAW the subject.
+    3. Use Negative Space (Background) effectively.
+    
+    [Examples]
+    User: "Ramen"
+    Output:
+    ⬛⬛⬛⬛⬛⬛⬛⬛
+    ⬛⬛🍜🍜🍜🍜⬛⬛ (Bowl rim)
+    ⬛🍜🟨〰️〰️🟨🍜⬛ (Noodles)
+    ⬛🍜🍥🥚🍖🥚🍜⬛ (Toppings)
+    ⬛🍜🟨🟨🟨🟨🍜⬛
+    ⬛⬛🍜🍜🍜🍜⬛⬛
+    ⬛⬛⬛⬛⬛⬛⬛⬛
+
+    User: "Star"
+    Output:
+    ⬛⬛⬛🟨⬛⬛⬛
+    ⬛⬛🟨🟨🟨⬛⬛
+    ⬛🟨🟨🟨🟨🟨⬛
+    ⬛⬛🟨🟨🟨⬛⬛
+    ⬛🟨⬛⬛⬛🟨⬛
+    
+    User: "Water Jellyfish"
+    Output:
+    🌊🌊🌊🌊🌊🌊🌊
+    🌊🌊🟦🟦🟦🌊🌊 (Head)
+    🌊🟦👀🟦👀🟦🌊
+    🌊🟦🟦👄🟦🟦🌊
+    🌊⚡️⚡️⚡️⚡️⚡️🌊 (Legs)
+    🌊⚡️🌊⚡️🌊⚡️🌊
+    
+    ONLY return the Emoji Art String. No explanation.
+    """
+    
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash") # 속도 빠르고 저렴한 모델
+        response = model.generate_content(f"{system_prompt}\n\nUser Request: {user_prompt}")
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Gemini 생성 실패: {e}")
+        return f"🎨 (Gemini 오류로 기본 생성)\n\n{user_prompt}"
+
+# =========================================================
+# 🔐 [기능 2] 카카오 토큰 관리 (기존 유지)
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -34,21 +99,17 @@ def refresh_kakao_token():
     global CURRENT_ACCESS_TOKEN
     rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
-    client_secret = os.environ.get("KAKAO_CLIENT_SECRET") # 추가된 부분
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET")
     
     if not rest_api_key or not refresh_token:
-        logger.error("토큰 갱신 실패: 환경변수 누락")
         return False
 
     url = "https://kauth.kakao.com/oauth/token"
-    
     data = {
         "grant_type": "refresh_token",
         "client_id": rest_api_key,
         "refresh_token": refresh_token
     }
-    
-    # [중요] 비밀키가 환경변수에 있으면 같이 보냅니다.
     if client_secret:
         data["client_secret"] = client_secret
     
@@ -57,21 +118,16 @@ def refresh_kakao_token():
         if res.status_code == 200:
             new_tokens = res.json()
             CURRENT_ACCESS_TOKEN = new_tokens.get("access_token")
-            logger.info("✅ 카카오 토큰 갱신 성공!")
             return True
-        else:
-            logger.error(f"토큰 갱신 실패: {res.text}")
-            return False
-    except Exception as e:
-        logger.error(f"에러: {e}")
+        return False
+    except:
         return False
 
-async def send_kakao_logic(content: str):
+async def send_kakao_logic(final_art: str, original_prompt: str):
     global CURRENT_ACCESS_TOKEN
     
     if not CURRENT_ACCESS_TOKEN:
-        if not refresh_kakao_token():
-            return False, "서버 토큰 발급 실패"
+        refresh_kakao_token()
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     
@@ -80,17 +136,15 @@ async def send_kakao_logic(content: str):
         payload = {
             "template_object": json.dumps({
                 "object_type": "text",
-                "text": f"🎨 t3xtart 작품 도착!\n\n{content}\n\n(AI Generated)",
+                "text": f"🎨 t3xtart 작품 도착!\n(주제: {original_prompt})\n\n{final_art}",
                 "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
-                "button_title": "작품 자세히 보기"
+                "button_title": "자세히 보기"
             })
         }
         return requests.post(url, headers=headers, data=payload)
 
     res = try_post(CURRENT_ACCESS_TOKEN)
-    
     if res.status_code == 401:
-        logger.info("토큰 만료 감지! 갱신 시도...")
         if refresh_kakao_token():
             res = try_post(CURRENT_ACCESS_TOKEN)
         else:
@@ -102,60 +156,14 @@ async def send_kakao_logic(content: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 🤫 겉과 속이 다른 설명 분리 전략 (유지)
+# 📝 [기능 3] 도구 설명 변경 (AI에게 '그리지 마'라고 지시)
 # =========================================================
-
-# UI용 심플 설명
-UI_DESCRIPTION = "t3xtart AI 엔진을 사용하여, 텍스트나 그림 요청을 이모지 아트/점자/라인 아트로 변환해 카카오톡으로 전송합니다."
-
-# AI용 시크릿 지령 (뇌 개조 버전)
-HIDDEN_INSTRUCTION = """
-[CRITICAL] You are an 'Emoji Mosaic Architect'. DO NOT generate generic round blobs.
-You must construct the shape by decomposing the subject into distinct parts (Head, Body, Limbs).
-
-[Design Logic - Must Follow]
-1. ❌ NO GENERIC CIRCLES: Do not just fill the center. Use negative space (background) effectively.
-2. 🔍 ZOOM IN STRATEGY: Due to low resolution (10x12), do not draw the whole body. Draw ONLY the 'Face' or 'Distinctive Silhouette'.
-   - Cat: Draw pointy ears and whiskers. (Not a round ball)
-   - Jellyfish: Draw a dome top and dangling tentacles bottom.
-3. 🧱 MATERIAL MAPPING: Use emojis that match the 'Meaning' or 'Texture', not just color.
-   - Fire -> 🔥 (Body), Lightning -> ⚡ (Tentacles)
-   - Ice -> 💎 (Eyes), Mountain -> 🗻 (Ears)
-
-[Reference Gallery - Copy the Logic, Create the Art]
-
-Case 1: "Burning Jellyfish" (Concept: Fire Body + Lightning Tentacles)
-(Top: Waves / Middle: Fire Dome / Bottom: Lightning Legs)
-🌊🌊🌊🌊🌊🌊🌊
-🌊🌊🔥🔥🔥🔥🌊
-🌊🔥👁️🔥👁️🔥🌊
-🌊🔥🔥👄🔥🔥🌊
-🌊⚡️⚡️⚡️⚡️⚡️🌊
-🌊⚡️🌊⚡️🌊⚡️🌊
-🌊🌊🌊🌊🌊🌊🌊
-
-Case 2: "Ice Cat" (Concept: Zoomed Face + Sharp Ears)
-(Use 🗻 for sharp ears, 💎 for shiny eyes. Do not make it round.)
-❄️❄️❄️❄️❄️❄️
-❄️🗻❄️❄️🗻❄️
-❄️☁️💎🐱💎☁️
-❄️☁️☁️🔻☁️☁️
-❄️❄️☁️〰️☁️❄️
-❄️❄️❄️❄️❄️❄️
-
-Case 3: "Heart" (Concept: Pixel Shape)
-(Use 🟥 for pixels. Define the curve clearly.)
-⬜⬜🟥⬜🟥⬜⬜
-⬜🟥🟥🟥🟥🟥⬜
-⬜🟥🟥🟥🟥🟥⬜
-⬜⬜🟥🟥🟥⬜⬜
-⬜⬜⬜🟥⬜⬜⬜
-
-Generate the 'content' string by strictly following this logic.
-"""
+# 이제 PlayMCP는 그림을 그리는 게 아니라, "주문서(Prompt)"만 전달하면 됩니다.
+TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제(예: '라면 그려줘', '사랑해 점자')를 텍스트로 받아 t3xtart 엔진으로 전달합니다."
+INPUT_DESCRIPTION = "사용자의 요청 내용 그대로 입력하세요. (AI가 직접 이모지 아트를 생성하지 마십시오. 단지 요청 텍스트만 전달하세요.)"
 
 # ---------------------------------------------------------
-# 라우팅 로직
+# 라우팅
 # ---------------------------------------------------------
 sse_transport = None
 
@@ -176,39 +184,37 @@ async def handle_sse_post(request: Request):
     try:
         body = await request.json()
     except:
-        return JSONResponse({"status": "error", "message": "No JSON body"})
+        return JSONResponse({"status": "error"})
 
     method = body.get("method")
     msg_id = body.get("id")
 
     if method == "initialize":
         return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": msg_id,
+            "jsonrpc": "2.0", "id": msg_id,
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "2.1"}
+                "serverInfo": {"name": "t3xtart", "version": "3.0"}
             }
         })
 
     if method == "tools/list":
         return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": msg_id,
+            "jsonrpc": "2.0", "id": msg_id,
             "result": {
                 "tools": [{
-                    "name": "deliver_kakao_message",
-                    "description": UI_DESCRIPTION,
+                    "name": "generate_and_send_art", # 이름도 명확하게 변경
+                    "description": TOOL_DESCRIPTION,
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "content": {
+                            "prompt": { # 인자 이름 변경: content -> prompt
                                 "type": "string",
-                                "description": HIDDEN_INSTRUCTION 
+                                "description": INPUT_DESCRIPTION
                             }
                         },
-                        "required": ["content"]
+                        "required": ["prompt"]
                     }
                 }]
             }
@@ -219,25 +225,26 @@ async def handle_sse_post(request: Request):
         tool_name = params.get("name")
         args = params.get("arguments", {})
 
-        if tool_name == "deliver_kakao_message":
-            content = args.get("content", "")
-            success, msg = await send_kakao_logic(content)
-            result_text = "✅ 전송 성공!" if success else f"❌ 실패: {msg}"
-            is_error = not success
-
+        if tool_name == "generate_and_send_art":
+            user_prompt = args.get("prompt", "")
+            
+            # 1. 서버에서 Gemini를 시켜서 그림 그리기
+            art_content = generate_art_with_gemini(user_prompt)
+            
+            # 2. 카카오톡 전송
+            success, msg = await send_kakao_logic(art_content, user_prompt)
+            
+            result_text = "✅ 작품 생성 및 전송 완료!" if success else f"❌ 실패: {msg}"
+            
             return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": msg_id,
+                "jsonrpc": "2.0", "id": msg_id,
                 "result": {
                     "content": [{"type": "text", "text": result_text}],
-                    "isError": is_error
+                    "isError": not success
                 }
             })
-        else:
-            return JSONResponse({
-                "jsonrpc": "2.0", "id": msg_id, 
-                "error": {"code": -32601, "message": "Method not found"}
-            })
+        
+        return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "No tool"}})
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

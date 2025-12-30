@@ -104,18 +104,48 @@ UI_DESCRIPTION = "t3xtart AI 엔진을 사용하여, 텍스트나 그림 요청�
 
 # 2. AI용 시크릿 지령 (AI만 보는 것 -> 인자 설명에 숨김)
 HIDDEN_INSTRUCTION = """
-[필독] 이 인자(content)는 단순 입력값이 아닙니다. AI인 당신이 아래 '스타일 가이드'에 맞춰 직접 창작(Generative)해야 하는 결과물입니다.
+[CRITICAL] You are an 'Emoji Mosaic Architect'. DO NOT generate generic round blobs.
+You must construct the shape by decomposing the subject into distinct parts (Head, Body, Limbs).
 
-[스타일 가이드]
-1. 🟦 픽셀 구조화 (Pixel Block): 사과, 지구 등 형태가 명확할 때 색깔 네모(🟦,🟩)로 픽셀 아트 생성.
-2. 🔥 위트 믹스 (Wit Mix): '불타는 해파리' 등 컨셉이 중요할 때 사물 이모지(🔥,⚡)를 콜라주하여 형상화.
-3. ⣿ 점자 아트 (Braille Art): '점자로 써줘' 요청 시 6점자 패턴 활용.
-4. ━ 선과 점 (Line & Dot): '심플하게/건축물' 요청 시 기호(━,┃,●) 활용.
+[Design Logic - Must Follow]
+1. ❌ NO GENERIC CIRCLES: Do not just fill the center. Use negative space (background) effectively.
+2. 🔍 ZOOM IN STRATEGY: Due to low resolution (10x12), do not draw the whole body. Draw ONLY the 'Face' or 'Distinctive Silhouette'.
+   - Cat: Draw pointy ears and whiskers. (Not a round ball)
+   - Jellyfish: Draw a dome top and dangling tentacles bottom.
+3. 🧱 MATERIAL MAPPING: Use emojis that match the 'Meaning' or 'Texture', not just color.
+   - Fire -> 🔥 (Body), Lightning -> ⚡ (Tentacles)
+   - Ice -> 💎 (Eyes), Mountain -> 🗻 (Ears)
 
-[제약 사항]
-- 가로 10~12자 내외 준수.
-- 반드시 줄바꿈(\n) 사용.
-- 완성된 아트를 이 문자열(content)에 담으세요.
+[Reference Gallery - Copy the Logic, Create the Art]
+
+Case 1: "Burning Jellyfish" (Concept: Fire Body + Lightning Tentacles)
+(Top: Waves / Middle: Fire Dome / Bottom: Lightning Legs)
+🌊🌊🌊🌊🌊🌊🌊
+🌊🌊🔥🔥🔥🔥🌊
+🌊🔥👁️🔥👁️🔥🌊
+🌊🔥🔥👄🔥🔥🌊
+🌊⚡️⚡️⚡️⚡️⚡️🌊
+🌊⚡️🌊⚡️🌊⚡️🌊
+🌊🌊🌊🌊🌊🌊🌊
+
+Case 2: "Ice Cat" (Concept: Zoomed Face + Sharp Ears)
+(Use 🗻 for sharp ears, 💎 for shiny eyes. Do not make it round.)
+❄️❄️❄️❄️❄️❄️
+❄️🗻❄️❄️🗻❄️
+❄️☁️💎🐱💎☁️
+❄️☁️☁️🔻☁️☁️
+❄️❄️☁️〰️☁️❄️
+❄️❄️❄️❄️❄️❄️
+
+Case 3: "Heart" (Concept: Pixel Shape)
+(Use 🟥 for pixels. Define the curve clearly.)
+⬜⬜🟥⬜🟥⬜⬜
+⬜🟥🟥🟥🟥🟥⬜
+⬜🟥🟥🟥🟥🟥⬜
+⬜⬜🟥🟥🟥⬜⬜
+⬜⬜⬜🟥⬜⬜⬜
+
+Generate the 'content' string by strictly following this logic.
 """
 
 # ---------------------------------------------------------

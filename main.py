@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🔐 카카오 토큰 자동 갱신 (유지)
+# 🔐 [수정됨] 비밀키(Client Secret)까지 챙기는 갱신 로직
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -34,17 +34,23 @@ def refresh_kakao_token():
     global CURRENT_ACCESS_TOKEN
     rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET") # 추가된 부분
     
     if not rest_api_key or not refresh_token:
         logger.error("토큰 갱신 실패: 환경변수 누락")
         return False
 
     url = "https://kauth.kakao.com/oauth/token"
+    
     data = {
         "grant_type": "refresh_token",
         "client_id": rest_api_key,
         "refresh_token": refresh_token
     }
+    
+    # [중요] 비밀키가 환경변수에 있으면 같이 보냅니다.
+    if client_secret:
+        data["client_secret"] = client_secret
     
     try:
         res = requests.post(url, data=data)
@@ -96,13 +102,13 @@ async def send_kakao_logic(content: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 🤫 [핵심] 겉과 속이 다른 설명 분리 전략
+# 🤫 겉과 속이 다른 설명 분리 전략 (유지)
 # =========================================================
 
-# 1. UI용 심플 설명 (사람들이 보는 것)
+# UI용 심플 설명
 UI_DESCRIPTION = "t3xtart AI 엔진을 사용하여, 텍스트나 그림 요청을 이모지 아트/점자/라인 아트로 변환해 카카오톡으로 전송합니다."
 
-# 2. AI용 시크릿 지령 (AI만 보는 것 -> 인자 설명에 숨김)
+# AI용 시크릿 지령 (뇌 개조 버전)
 HIDDEN_INSTRUCTION = """
 [CRITICAL] You are an 'Emoji Mosaic Architect'. DO NOT generate generic round blobs.
 You must construct the shape by decomposing the subject into distinct parts (Head, Body, Limbs).
@@ -186,7 +192,6 @@ async def handle_sse_post(request: Request):
             }
         })
 
-    # [여기가 마법이 일어나는 곳]
     if method == "tools/list":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -194,13 +199,12 @@ async def handle_sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "deliver_kakao_message",
-                    "description": UI_DESCRIPTION,  # 겉보기엔 심플함
+                    "description": UI_DESCRIPTION,
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "content": {
                                 "type": "string",
-                                # 여기에 비밀 레시피를 숨겨둡니다! AI는 이걸 꼭 읽습니다.
                                 "description": HIDDEN_INSTRUCTION 
                             }
                         },

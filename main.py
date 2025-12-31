@@ -27,13 +27,72 @@ app.add_middleware(
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # =========================================================
-# 🧠 [배틀 모드] 엘리트 모델 2종 동시 출격
+# 🕵️‍♂️ [지능형 스카우터] 쓸 수 있는 '최고의 모델' 2개 찾기
+# =========================================================
+def get_battle_candidates():
+    """
+    구글 API에 접속해 현재 사용 가능한 모델 리스트를 받아온 뒤,
+    'Pro'급과 'Flash'급 모델 중 가장 적합한 2개를 선별합니다.
+    """
+    if not GOOGLE_API_KEY:
+        logger.error("❌ API 키가 없습니다.")
+        return []
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GOOGLE_API_KEY}"
+    try:
+        res = requests.get(url)
+        if res.status_code != 200:
+            logger.error(f"❌ 모델 리스트 조회 실패: {res.text}")
+            return []
+            
+        data = res.json()
+        all_models = [
+            m['name'] for m in data.get('models', []) 
+            if 'generateContent' in m.get('supportedGenerationMethods', [])
+        ]
+        
+        # [엄격한 필터링] 멍청한 모델(nano, gemma) 절대 사절
+        # 우선순위: 1.5 Pro > 1.5 Flash > 1.0 Pro
+        
+        pro_models = [m for m in all_models if '1.5-pro' in m and 'vision' not in m]
+        flash_models = [m for m in all_models if '1.5-flash' in m and 'vision' not in m]
+        legacy_pro = [m for m in all_models if 'gemini-pro' in m and 'vision' not in m]
+        
+        candidates = []
+        
+        # 1번 선수: 지능형 (Pro 계열 최신)
+        if pro_models:
+            candidates.append(pro_models[0]) # 리스트의 첫 번째(보통 최신)
+        elif legacy_pro:
+            candidates.append(legacy_pro[0])
+            
+        # 2번 선수: 속도형 (Flash 계열 최신)
+        if flash_models:
+            candidates.append(flash_models[0])
+            
+        # 만약 리스트가 비었다면(권한 문제 등), 있는 것 중 아무거나 'gemini' 들어간 걸로 채움
+        if len(candidates) < 2:
+            others = [m for m in all_models if 'gemini' in m and m not in candidates]
+            candidates.extend(others[:2-len(candidates)])
+            
+        logger.info(f"⚔️ [배틀 참가 선수 확정]: {candidates}")
+        return candidates
+
+    except Exception as e:
+        logger.error(f"❌ 스카우팅 에러: {e}")
+        return []
+
+# =========================================================
+# 🧠 [배틀 모드] 자동 선발된 모델로 생성
 # =========================================================
 def generate_art_battle_mode(user_prompt: str):
-    if not GOOGLE_API_KEY:
-        return [("❌ API 키 없음", "System Error")]
+    # 1. 선수 선발
+    battle_models = get_battle_candidates()
+    
+    if not battle_models:
+        return [("❌ 사용 가능한 Gemini 모델을 찾지 못했습니다. (API Key 권한 확인)", "System Error")]
 
-    # [강화된 프롬프트] 중도 포기 방지 및 구조 강제
+    # [프롬프트] 픽셀 아트 전문가 모드
     system_prompt = """
     Role: You are a master of 'Emoji Pixel Art'. 
     Task: Convert the user's request into a strict 10x12 grid art.
@@ -89,50 +148,58 @@ def generate_art_battle_mode(user_prompt: str):
     ❄️⬜🟥⬜🟥⬜❄️
     ❄️🟥⬜🟥⬜🟥❄️
     ❄️❄️❄️❄️❄️❄️❄️
+    
+    User: "Monkey under leaf"
+    Output:
+    🌿🌿🌿🌿🌿🌿🌿🌿
+    🌿🌿🌿🌿🌿🌿🌿🌿
+    🌿🌿🙈🙈🙈🙈🌿🌿
+    🌿🌿🙈🐵🐵🙈🌿🌿
+    🌿🌿💪🟫🟫💪🌿🌿
+    🌿🌿🌿🟫🟫🌿🌿🌿
 
     Now, generate art for:
     """
 
-    # ✅ 테스트를 위한 가장 안정적인 엘리트 모델 2종 고정
-    battle_models = [
-        "models/gemini-1.5-pro",   # 기호 1번: 똑똑이
-        "models/gemini-1.5-flash"  # 기호 2번: 날쌘돌이
-    ]
-    
     battle_results = []
 
     for model_name in battle_models:
+        # model_name은 이미 'models/...' 형태임
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={GOOGLE_API_KEY}"
         headers = {"Content-Type": "application/json"}
-        # temperature를 약간 높여서(0.5) 창의성을 부여하되 규칙은 지키게 함
+        
         payload = {
             "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
-            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 500}
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 500}
         }
         
         try:
-            logger.info(f"🤖 {model_name} 생성 시작...")
+            logger.info(f"🤖 {model_name} 생성 시도...")
             response = requests.post(url, headers=headers, data=json.dumps(payload))
             if response.status_code == 200:
                 result = response.json()
                 if 'candidates' in result and result['candidates']:
                     text = result['candidates'][0]['content']['parts'][0]['text']
-                    battle_results.append((text.strip(), model_name)) # 결과 저장
+                    battle_results.append((text.strip(), model_name))
                     logger.info(f"✅ {model_name} 성공!")
                 else:
-                    battle_results.append(("(생성된 내용 없음)", model_name))
+                    battle_results.append(("(내용 없음)", model_name))
             else:
-                battle_results.append((f"(에러: {response.status_code})", model_name))
+                # 에러 메시지 간소화
+                error_msg = f"Error {response.status_code}"
+                if response.status_code == 404: error_msg = "Not Found (404)"
+                if response.status_code == 403: error_msg = "Permission Denied (403)"
+                battle_results.append((f"({error_msg})", model_name))
                 logger.warning(f"⚠️ {model_name} 실패: {response.status_code}")
 
         except Exception as e:
-            battle_results.append((f"(통신 에러: {e})", model_name))
+            battle_results.append(("(통신 에러)", model_name))
             logger.error(f"❌ {model_name} 에러: {e}")
             
     return battle_results
 
 # =========================================================
-# 🔐 카카오 토큰 관리 (기존 유지)
+# 🔐 카카오 토큰 관리
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -164,9 +231,6 @@ def refresh_kakao_token():
     except:
         return False
 
-# =========================================================
-# 📨 [수정됨] 카카오 전송 로직 (배틀 결과 합치기)
-# =========================================================
 async def send_kakao_battle_result(results_list: list, original_prompt: str):
     global CURRENT_ACCESS_TOKEN
     
@@ -175,11 +239,11 @@ async def send_kakao_battle_result(results_list: list, original_prompt: str):
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     
-    # 메시지 내용 구성 (결과 합치기)
-    final_message = f"🎨 t3xtart 모델 성능 테스트\n(주제: {original_prompt})\n\n"
+    final_message = f"🎨 t3xtart 모델 배틀\n(주제: {original_prompt})\n\n"
     for art, model_name in results_list:
-        display_name = model_name.replace("models/", "").upper()
-        final_message += f"➖➖➖➖➖➖➖➖\n🏆 [Artist: {display_name}]\n\n{art}\n\n"
+        # 모델명 깔끔하게 (models/gemini-1.5-pro-latest -> GEMINI-1.5-PRO...)
+        short_name = model_name.replace("models/", "").split("-00")[0].upper()
+        final_message += f"➖➖➖➖➖➖➖➖\n🏆 [{short_name}]\n\n{art}\n\n"
     final_message += "➖➖➖➖➖➖➖➖"
 
     def try_post(token):
@@ -189,7 +253,7 @@ async def send_kakao_battle_result(results_list: list, original_prompt: str):
                 "object_type": "text",
                 "text": final_message,
                 "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
-                "button_title": "테스트 결과 자세히 보기"
+                "button_title": "자세히 보기"
             })
         }
         return requests.post(url, headers=headers, data=payload)
@@ -210,7 +274,7 @@ async def send_kakao_battle_result(results_list: list, original_prompt: str):
 # 📝 도구 설명
 # =========================================================
 TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제를 받아, 최고의 Gemini 모델들이 경쟁하여 생성한 이모지 아트를 카카오톡으로 전송합니다."
-INPUT_DESCRIPTION = "사용자의 요청 내용 (예: '날개 달린 모자 그려줘')"
+INPUT_DESCRIPTION = "사용자의 요청 내용 (예: '나뭇잎에 덮인 원숭이 그려줘')"
 
 # ---------------------------------------------------------
 # 라우팅
@@ -245,7 +309,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "6.0-battle"}
+                "serverInfo": {"name": "t3xtart", "version": "7.0-auto-battle"}
             }
         })
 
@@ -277,13 +341,8 @@ async def handle_sse_post(request: Request):
 
         if tool_name == "generate_and_send_art":
             user_prompt = args.get("prompt", "")
-            
-            # 1. 배틀 모드 실행 (결과 리스트 반환)
-            battle_results = generate_art_battle_mode(user_prompt)
-            
-            # 2. 카톡 전송 (결과 합쳐서)
-            success, msg = await send_kakao_battle_result(battle_results, user_prompt)
-            
+            results = generate_art_battle_mode(user_prompt)
+            success, msg = await send_kakao_battle_result(results, user_prompt)
             result_text = "✅ 모델 성능 테스트 결과 전송 완료!" if success else f"❌ 실패: {msg}"
             
             return JSONResponse({

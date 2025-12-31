@@ -27,14 +27,10 @@ app.add_middleware(
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # =========================================================
-# 🕵️‍♂️ [신규 기능] 브라우저에서 모델 확인하기 (중요!)
+# 🕵️‍♂️ [디버깅] 브라우저에서 모델 확인 (/test)
 # =========================================================
 @app.get("/test")
 async def test_gemini_connection():
-    """
-    브라우저 주소창에 https://내주소/test 라고 치면
-    사용 가능한 모델 리스트를 화면에 뿌려줍니다.
-    """
     if not GOOGLE_API_KEY:
         return {"status": "error", "message": "GOOGLE_API_KEY가 없습니다."}
 
@@ -43,6 +39,7 @@ async def test_gemini_connection():
         res = requests.get(url)
         if res.status_code == 200:
             models = res.json().get('models', [])
+            # 생성 가능한 모델만 필터링
             available_models = [m['name'] for m in models if "generateContent" in m.get('supportedGenerationMethods', [])]
             return {
                 "status": "ok", 
@@ -55,7 +52,7 @@ async def test_gemini_connection():
         return {"status": "error", "message": str(e)}
 
 # =========================================================
-# 🧠 [수정됨] Gemini 호출 (이름을 가장 확실한 것으로 변경)
+# 🧠 [수정됨] Gemini 호출 (리스트에 있는 모델로 교체)
 # =========================================================
 def generate_art_with_gemini(user_prompt: str):
     if not GOOGLE_API_KEY:
@@ -69,12 +66,13 @@ def generate_art_with_gemini(user_prompt: str):
     3. Output ONLY the emoji string.
     """
 
-    # ✅ [변경] 가장 확실한 모델명 2가지
-    # 1순위: 1.5 Flash (가벼움)
-    # 2순위: 1.5 Pro (똑똑함)
+    # ✅ [변경] /test 리스트에 '확실히 있는' 모델명들
+    # latest 별칭을 쓰면 알아서 최신(1.5 또는 2.0)으로 연결됩니다.
     candidate_models = [
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-pro"
+        "models/gemini-flash-latest",    # 1순위: 최신 플래시
+        "models/gemini-2.0-flash-exp",   # 2순위: 2.0 실험 버전
+        "models/gemini-pro-latest",      # 3순위: 최신 프로
+        "models/gemini-1.5-flash-latest" # 4순위: 1.5 최신
     ]
 
     for model_name in candidate_models:
@@ -89,18 +87,22 @@ def generate_art_with_gemini(user_prompt: str):
             response = requests.post(url, headers=headers, data=json.dumps(payload))
             if response.status_code == 200:
                 result = response.json()
-                text = result['candidates'][0]['content']['parts'][0]['text']
-                logger.info(f"✅ Gemini 성공 ({model_name})")
-                return text.strip()
+                # 응답 구조 파싱 안전장치
+                if 'candidates' in result and result['candidates']:
+                    text = result['candidates'][0]['content']['parts'][0]['text']
+                    logger.info(f"✅ Gemini 성공 ({model_name})")
+                    return text.strip()
+                else:
+                    logger.warning(f"⚠️ 모델 응답 비어있음 ({model_name})")
+                    continue
             else:
                 logger.warning(f"⚠️ 모델 실패 ({model_name}): {response.status_code}")
-                # 404가 뜨면 다음 모델로 넘어감
-                continue
+                continue # 다음 모델 시도
         except Exception as e:
             logger.error(f"❌ 통신 에러 ({model_name}): {e}")
             continue
             
-    return "🎨 (AI 생성 실패) Gemini 모델을 찾을 수 없습니다. /test 페이지를 확인해주세요."
+    return "🎨 (AI 생성 실패) Gemini 모델 연결에 실패했습니다. 잠시 후 다시 시도해주세요."
 
 # =========================================================
 # 🔐 카카오 토큰 관리
@@ -206,7 +208,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "3.5"}
+                "serverInfo": {"name": "t3xtart", "version": "3.6"}
             }
         })
 

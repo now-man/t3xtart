@@ -9,17 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 from mcp.server.sse import SseServerTransport
-import google.generativeai as genai
 
 # 로그 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("t3xtart")
-
-# ✅ [디버깅] 현재 설치된 Gemini 라이브러리 버전 확인
-try:
-    logger.info(f"🤖 Installed Gemini Library Version: {genai.__version__}")
-except:
-    logger.info("🤖 Gemini Library Version: (Unknown)")
 
 app = FastAPI()
 
@@ -32,17 +25,22 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🧠 [수정됨] 3중 안전장치 Gemini 생성기
+# 🧠 [수정됨] Gemini 직접 호출 (REST API 방식)
+# 라이브러리 버전 문제 해결을 위한 '직통 전화'
 # =========================================================
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
 
 def generate_art_with_gemini(user_prompt: str):
     if not GOOGLE_API_KEY:
         return "❌ 서버 설정 오류: GOOGLE_API_KEY 없음"
 
+    # Gemini 1.5 Flash 모델 엔드포인트 (직접 호출)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GOOGLE_API_KEY}"
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
     system_prompt = """
     You are a 'Pixel Emoji Artist'. convert the user's request into a 10x12 grid emoji art.
     RULES:
@@ -50,29 +48,54 @@ def generate_art_with_gemini(user_prompt: str):
     2. Use COLORED BLOCKS (🟦,🟥,🟨,⬜,⬛) or Shapes to DRAW the subject.
     3. Output ONLY the emoji string.
     """
-    
-    # 시도할 모델 목록 (최신 -> 구형 순서)
-    # gemini-pro는 가장 기본 모델이라 거의 무조건 됩니다.
-    candidate_models = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-1.0-pro", 
-        "gemini-pro"
-    ]
 
-    for model_name in candidate_models:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(f"{system_prompt}\n\nUser Request: {user_prompt}")
-            if response.text:
-                logger.info(f"✅ 성공한 모델: {model_name}")
-                return response.text.strip()
-        except Exception as e:
-            # 404 에러면 다음 모델로 넘어감
-            logger.warning(f"⚠️ 모델 실패 ({model_name}): {e}")
-            continue
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": f"{system_prompt}\n\nUser Request: {user_prompt}"
+            }]
+        }],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 300,
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        
+        if response.status_code == 200:
+            result = response.json()
+            # Gemini 응답 파싱
+            try:
+                text_content = result['candidates'][0]['content']['parts'][0]['text']
+                logger.info("✅ Gemini 생성 성공 (REST API)")
+                return text_content.strip()
+            except:
+                return "🎨 (생성 오류) 응답 형식이 올바르지 않습니다."
+        else:
+            logger.error(f"❌ Gemini API 오류 ({response.status_code}): {response.text}")
+            # 1.5 Flash 실패 시 구형 Pro 모델 시도 (Fallback)
+            return try_fallback_model(user_prompt, system_prompt)
             
-    return f"🎨 (AI 생성 실패) 모든 모델이 응답하지 않습니다. 서버 로그를 확인해주세요."
+    except Exception as e:
+        logger.error(f"❌ 통신 에러: {e}")
+        return f"🎨 (서버 에러) Gemini와 연결할 수 없습니다."
+
+def try_fallback_model(user_prompt, system_prompt):
+    """Flash 모델 실패 시 Pro 모델로 재시도"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GOOGLE_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}]
+    }
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(payload))
+        if res.status_code == 200:
+            return res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+    except:
+        pass
+    return "🎨 (AI 생성 실패) 모든 모델이 응답하지 않습니다."
 
 # =========================================================
 # 🔐 카카오 토큰 관리 (기존 유지)
@@ -178,7 +201,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "3.2"}
+                "serverInfo": {"name": "t3xtart", "version": "3.3"}
             }
         })
 

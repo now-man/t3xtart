@@ -15,6 +15,12 @@ import google.generativeai as genai
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("t3xtart")
 
+# ✅ [디버깅] 현재 설치된 Gemini 라이브러리 버전 확인
+try:
+    logger.info(f"🤖 Installed Gemini Library Version: {genai.__version__}")
+except:
+    logger.info("🤖 Gemini Library Version: (Unknown)")
+
 app = FastAPI()
 
 app.add_middleware(
@@ -26,7 +32,7 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🧠 [수정됨] Gemini 안전 모드 (Flash 실패 시 Pro로 전환)
+# 🧠 [수정됨] 3중 안전장치 Gemini 생성기
 # =========================================================
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
@@ -45,22 +51,28 @@ def generate_art_with_gemini(user_prompt: str):
     3. Output ONLY the emoji string.
     """
     
-    # 1차 시도: 빠르고 똑똑한 Flash 모델
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(f"{system_prompt}\n\nUser Request: {user_prompt}")
-        return response.text.strip()
-    except Exception as e:
-        logger.error(f"⚠️ Flash 모델 실패 ({e}). Pro 모델로 재시도합니다.")
-        
-        # 2차 시도: 구관이 명관 (Gemini Pro)
+    # 시도할 모델 목록 (최신 -> 구형 순서)
+    # gemini-pro는 가장 기본 모델이라 거의 무조건 됩니다.
+    candidate_models = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro", 
+        "gemini-pro"
+    ]
+
+    for model_name in candidate_models:
         try:
-            model = genai.GenerativeModel("gemini-pro")
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content(f"{system_prompt}\n\nUser Request: {user_prompt}")
-            return response.text.strip()
-        except Exception as e2:
-            logger.error(f"❌ 모든 모델 생성 실패: {e2}")
-            return f"🎨 (AI 생성 실패) 죄송합니다. 요청하신 '{user_prompt}'를 그리는 데 실패했습니다."
+            if response.text:
+                logger.info(f"✅ 성공한 모델: {model_name}")
+                return response.text.strip()
+        except Exception as e:
+            # 404 에러면 다음 모델로 넘어감
+            logger.warning(f"⚠️ 모델 실패 ({model_name}): {e}")
+            continue
+            
+    return f"🎨 (AI 생성 실패) 모든 모델이 응답하지 않습니다. 서버 로그를 확인해주세요."
 
 # =========================================================
 # 🔐 카카오 토큰 관리 (기존 유지)
@@ -128,7 +140,7 @@ async def send_kakao_logic(final_art: str, original_prompt: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 📝 도구 설명 (기존 유지)
+# 📝 도구 설명
 # =========================================================
 TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제(예: '라면 그려줘', '사랑해 점자')를 텍스트로 받아 t3xtart 엔진으로 전달합니다."
 INPUT_DESCRIPTION = "사용자의 요청 내용 그대로 입력하세요. (AI가 직접 이모지 아트를 생성하지 마십시오. 단지 요청 텍스트만 전달하세요.)"
@@ -166,7 +178,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "3.1"}
+                "serverInfo": {"name": "t3xtart", "version": "3.2"}
             }
         })
 

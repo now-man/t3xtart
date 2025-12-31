@@ -24,46 +24,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================================================
-# 🕵️‍♂️ [디버깅] 서버 시작 시 '사용 가능한 모델' 확인
-# =========================================================
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-def log_available_models():
+# =========================================================
+# 🕵️‍♂️ [신규 기능] 브라우저에서 모델 확인하기 (중요!)
+# =========================================================
+@app.get("/test")
+async def test_gemini_connection():
     """
-    내 API 키로 사용할 수 있는 모델의 '정확한 이름'을 구글에 물어보고 로그에 남깁니다.
+    브라우저 주소창에 https://내주소/test 라고 치면
+    사용 가능한 모델 리스트를 화면에 뿌려줍니다.
     """
     if not GOOGLE_API_KEY:
-        logger.error("❌ GOOGLE_API_KEY가 없습니다.")
-        return
+        return {"status": "error", "message": "GOOGLE_API_KEY가 없습니다."}
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GOOGLE_API_KEY}"
     try:
         res = requests.get(url)
         if res.status_code == 200:
             models = res.json().get('models', [])
-            logger.info("============== [Gemini 모델 리스트] ==============")
-            for m in models:
-                # 'generateContent' 기능을 지원하는 모델만 출력
-                if "generateContent" in m.get('supportedGenerationMethods', []):
-                    logger.info(f"✅ 사용 가능: {m['name']}") # 예: models/gemini-1.5-flash
-            logger.info("==================================================")
+            available_models = [m['name'] for m in models if "generateContent" in m.get('supportedGenerationMethods', [])]
+            return {
+                "status": "ok", 
+                "message": "Gemini 연결 성공!", 
+                "available_models": available_models
+            }
         else:
-            logger.error(f"❌ 모델 리스트 조회 실패: {res.text}")
+            return {"status": "error", "message": f"Gemini 연결 실패: {res.text}"}
     except Exception as e:
-        logger.error(f"❌ 모델 리스트 조회 중 에러: {e}")
-
-# 서버 시작할 때 한 번 실행 (로그 확인용)
-log_available_models()
+        return {"status": "error", "message": str(e)}
 
 # =========================================================
-# 🧠 [수정됨] Gemini 직접 호출 (이름 변경: flash-latest)
+# 🧠 [수정됨] Gemini 호출 (이름을 가장 확실한 것으로 변경)
 # =========================================================
 def generate_art_with_gemini(user_prompt: str):
     if not GOOGLE_API_KEY:
         return "❌ 서버 설정 오류: GOOGLE_API_KEY 없음"
 
-    # 프롬프트 설정
     system_prompt = """
     You are a 'Pixel Emoji Artist'. convert the user's request into a 10x12 grid emoji art.
     RULES:
@@ -72,61 +69,41 @@ def generate_art_with_gemini(user_prompt: str):
     3. Output ONLY the emoji string.
     """
 
-    # 1차 시도: 1.5 Flash (Latest 버전 명시)
-    # models/ 접두사를 포함해야 안전합니다.
-    target_model = "models/gemini-1.5-flash-latest" 
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
-        
-        if response.status_code == 200:
-            result = response.json()
-            try:
-                text_content = result['candidates'][0]['content']['parts'][0]['text']
-                logger.info(f"✅ Gemini 생성 성공 ({target_model})")
-                return text_content.strip()
-            except:
-                return "🎨 (생성 오류) 응답 형식이 올바르지 않습니다."
-        else:
-            logger.warning(f"⚠️ 1차 모델({target_model}) 실패: {response.status_code}. 2차 시도합니다.")
-            # 2차 시도: 1.0 Pro (가장 안정적)
-            return try_fallback_model(user_prompt, system_prompt)
-            
-    except Exception as e:
-        logger.error(f"❌ 통신 에러: {e}")
-        return try_fallback_model(user_prompt, system_prompt)
+    # ✅ [변경] 가장 확실한 모델명 2가지
+    # 1순위: 1.5 Flash (가벼움)
+    # 2순위: 1.5 Pro (똑똑함)
+    candidate_models = [
+        "models/gemini-1.5-flash",
+        "models/gemini-1.5-pro"
+    ]
 
-def try_fallback_model(user_prompt, system_prompt):
-    """Flash 실패 시 Pro 모델로 재시도"""
-    # models/gemini-pro (이건 1.0 버전이라 거의 100% 됩니다)
-    target_model = "models/gemini-pro"
-    url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
-    
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}]
-    }
-    try:
-        res = requests.post(url, headers=headers, data=json.dumps(payload))
-        if res.status_code == 200:
-            logger.info(f"✅ Gemini 생성 성공 ({target_model} - Fallback)")
-            return res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-        else:
-            logger.error(f"❌ 2차 모델({target_model}) 실패: {res.text}")
-    except Exception as e:
-        logger.error(f"❌ 2차 에러: {e}")
-    
-    return "🎨 (AI 생성 실패) 모든 모델이 응답하지 않습니다. Render 로그의 '모델 리스트'를 확인해주세요."
+    for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={GOOGLE_API_KEY}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, data=json.dumps(payload))
+            if response.status_code == 200:
+                result = response.json()
+                text = result['candidates'][0]['content']['parts'][0]['text']
+                logger.info(f"✅ Gemini 성공 ({model_name})")
+                return text.strip()
+            else:
+                logger.warning(f"⚠️ 모델 실패 ({model_name}): {response.status_code}")
+                # 404가 뜨면 다음 모델로 넘어감
+                continue
+        except Exception as e:
+            logger.error(f"❌ 통신 에러 ({model_name}): {e}")
+            continue
+            
+    return "🎨 (AI 생성 실패) Gemini 모델을 찾을 수 없습니다. /test 페이지를 확인해주세요."
 
 # =========================================================
-# 🔐 카카오 토큰 관리 (기존 유지)
+# 🔐 카카오 토큰 관리
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -191,7 +168,7 @@ async def send_kakao_logic(final_art: str, original_prompt: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 📝 도구 설명 (기존 유지)
+# 📝 도구 설명
 # =========================================================
 TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제(예: '라면 그려줘', '사랑해 점자')를 텍스트로 받아 t3xtart 엔진으로 전달합니다."
 INPUT_DESCRIPTION = "사용자의 요청 내용 그대로 입력하세요. (AI가 직접 이모지 아트를 생성하지 마십시오. 단지 요청 텍스트만 전달하세요.)"
@@ -229,7 +206,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "3.4"}
+                "serverInfo": {"name": "t3xtart", "version": "3.5"}
             }
         })
 

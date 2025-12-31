@@ -9,8 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 from mcp.server.sse import SseServerTransport
-
-# ✅ Gemini 라이브러리 추가
 import google.generativeai as genai
 
 # 로그 설정
@@ -28,7 +26,7 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🧠 [기능 1] Gemini에게 그림 시키기 (아트 엔진)
+# 🧠 [수정됨] Gemini 안전 모드 (Flash 실패 시 Pro로 전환)
 # =========================================================
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
@@ -36,62 +34,36 @@ if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 def generate_art_with_gemini(user_prompt: str):
-    """
-    사용자의 요청(예: '라면 그려줘')을 받아 Gemini가 고퀄리티 이모지 아트를 생성합니다.
-    """
     if not GOOGLE_API_KEY:
-        return "❌ 서버 설정 오류: GOOGLE_API_KEY가 없습니다. 기본 모드로 전환합니다."
+        return "❌ 서버 설정 오류: GOOGLE_API_KEY 없음"
 
-    # Gemini에게 주는 '진짜' 작업 지시서
     system_prompt = """
     You are a 'Pixel Emoji Artist'. convert the user's request into a 10x12 grid emoji art.
-    
-    [CRITICAL RULES]
-    1. DO NOT fill the background with the subject emoji. (e.g., Do not fill the square with 🍜).
-    2. USE COLORED BLOCKS (🟦, 🟥, 🟨, ⬜, ⬛) or specific shapes to DRAW the subject.
-    3. Use Negative Space (Background) effectively.
-    
-    [Examples]
-    User: "Ramen"
-    Output:
-    ⬛⬛⬛⬛⬛⬛⬛⬛
-    ⬛⬛🍜🍜🍜🍜⬛⬛ (Bowl rim)
-    ⬛🍜🟨〰️〰️🟨🍜⬛ (Noodles)
-    ⬛🍜🍥🥚🍖🥚🍜⬛ (Toppings)
-    ⬛🍜🟨🟨🟨🟨🍜⬛
-    ⬛⬛🍜🍜🍜🍜⬛⬛
-    ⬛⬛⬛⬛⬛⬛⬛⬛
-
-    User: "Star"
-    Output:
-    ⬛⬛⬛🟨⬛⬛⬛
-    ⬛⬛🟨🟨🟨⬛⬛
-    ⬛🟨🟨🟨🟨🟨⬛
-    ⬛⬛🟨🟨🟨⬛⬛
-    ⬛🟨⬛⬛⬛🟨⬛
-    
-    User: "Water Jellyfish"
-    Output:
-    🌊🌊🌊🌊🌊🌊🌊
-    🌊🌊🟦🟦🟦🌊🌊 (Head)
-    🌊🟦👀🟦👀🟦🌊
-    🌊🟦🟦👄🟦🟦🌊
-    🌊⚡️⚡️⚡️⚡️⚡️🌊 (Legs)
-    🌊⚡️🌊⚡️🌊⚡️🌊
-    
-    ONLY return the Emoji Art String. No explanation.
+    RULES:
+    1. DO NOT fill background with the subject emoji.
+    2. Use COLORED BLOCKS (🟦,🟥,🟨,⬜,⬛) or Shapes to DRAW the subject.
+    3. Output ONLY the emoji string.
     """
     
+    # 1차 시도: 빠르고 똑똑한 Flash 모델
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash") # 속도 빠르고 저렴한 모델
+        model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(f"{system_prompt}\n\nUser Request: {user_prompt}")
         return response.text.strip()
     except Exception as e:
-        logger.error(f"Gemini 생성 실패: {e}")
-        return f"🎨 (Gemini 오류로 기본 생성)\n\n{user_prompt}"
+        logger.error(f"⚠️ Flash 모델 실패 ({e}). Pro 모델로 재시도합니다.")
+        
+        # 2차 시도: 구관이 명관 (Gemini Pro)
+        try:
+            model = genai.GenerativeModel("gemini-pro")
+            response = model.generate_content(f"{system_prompt}\n\nUser Request: {user_prompt}")
+            return response.text.strip()
+        except Exception as e2:
+            logger.error(f"❌ 모든 모델 생성 실패: {e2}")
+            return f"🎨 (AI 생성 실패) 죄송합니다. 요청하신 '{user_prompt}'를 그리는 데 실패했습니다."
 
 # =========================================================
-# 🔐 [기능 2] 카카오 토큰 관리 (기존 유지)
+# 🔐 카카오 토큰 관리 (기존 유지)
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -156,9 +128,8 @@ async def send_kakao_logic(final_art: str, original_prompt: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 📝 [기능 3] 도구 설명 변경 (AI에게 '그리지 마'라고 지시)
+# 📝 도구 설명 (기존 유지)
 # =========================================================
-# 이제 PlayMCP는 그림을 그리는 게 아니라, "주문서(Prompt)"만 전달하면 됩니다.
 TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제(예: '라면 그려줘', '사랑해 점자')를 텍스트로 받아 t3xtart 엔진으로 전달합니다."
 INPUT_DESCRIPTION = "사용자의 요청 내용 그대로 입력하세요. (AI가 직접 이모지 아트를 생성하지 마십시오. 단지 요청 텍스트만 전달하세요.)"
 
@@ -195,7 +166,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "3.0"}
+                "serverInfo": {"name": "t3xtart", "version": "3.1"}
             }
         })
 
@@ -204,12 +175,12 @@ async def handle_sse_post(request: Request):
             "jsonrpc": "2.0", "id": msg_id,
             "result": {
                 "tools": [{
-                    "name": "generate_and_send_art", # 이름도 명확하게 변경
+                    "name": "generate_and_send_art",
                     "description": TOOL_DESCRIPTION,
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "prompt": { # 인자 이름 변경: content -> prompt
+                            "prompt": {
                                 "type": "string",
                                 "description": INPUT_DESCRIPTION
                             }
@@ -227,11 +198,7 @@ async def handle_sse_post(request: Request):
 
         if tool_name == "generate_and_send_art":
             user_prompt = args.get("prompt", "")
-            
-            # 1. 서버에서 Gemini를 시켜서 그림 그리기
             art_content = generate_art_with_gemini(user_prompt)
-            
-            # 2. 카카오톡 전송
             success, msg = await send_kakao_logic(art_content, user_prompt)
             
             result_text = "✅ 작품 생성 및 전송 완료!" if success else f"❌ 실패: {msg}"

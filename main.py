@@ -4,6 +4,7 @@ import logging
 import requests
 import uvicorn
 import asyncio
+import time  # ⏳ 시간 지연을 위해 추가
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -27,28 +28,25 @@ app.add_middleware(
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # =========================================================
-# 🧠 [단독 모드] Gemini 2.5 Flash + 충분한 토큰 확보
+# 🧠 [오뚝이 시스템] 재시도 & 백업 모델 로직
 # =========================================================
 def generate_art_with_gemini(user_prompt: str):
     if not GOOGLE_API_KEY:
         return "❌ 서버 설정 오류: API 키 없음"
 
-    # ✅ [핵심 변경 1] 사용자 요청대로 '2.5-flash' 모델 고정
-    # (참고: 이 모델은 최신 실험 버전이라 가끔 불안정할 수 있지만, 속도는 빠릅니다.)
-    target_model = "models/gemini-2.5-flash"
-
+    # 프롬프트 (공통 사용)
     system_prompt = """
     Role: You are a master of 'Emoji Pixel Art'. 
     Task: Convert the user's request into a **STRICT 10x12 GRID** art.
 
     [CRITICAL RULES - MUST FOLLOW]
-    1. ⚠️ **MUST COMPLETE THE GRID**: You MUST generate the full 12 rows. Do NOT stop mid-way. Do not output partial images.
+    1. ⚠️ **MUST COMPLETE THE GRID**: You MUST generate the full 12 rows. Do NOT stop mid-way.
     2. 🧱 **Structure**: Use colored blocks (⬛⬜🟥🟦🟩🟨🟧🟫) to construct the main shape.
-    3. 🎨 **Details**: Use specific emojis ONLY for crucial details (e.g., eyes, stars).
+    3. 🎨 **Details**: Use specific emojis ONLY for crucial details.
     4. 🚫 **Clean Output**: Output ONLY the grid string. No introduction text.
 
     [Reference Examples]
-    User: "Ramen"
+        User: "Ramen"
     Output:
     ⬛⬛⬛⬛⬛⬛⬛⬛
     ⬛⬛🍜🍜🍜🍜⬛⬛
@@ -92,63 +90,65 @@ def generate_art_with_gemini(user_prompt: str):
     ❄️⬜🟥⬜🟥⬜❄️
     ❄️🟥⬜🟥⬜🟥❄️
     ❄️❄️❄️❄️❄️❄️❄️
-    User: "Earth"
-    Output:
-    ⬛⬛⬛🟦🟦🟦⬛⬛
-    ⬛⬛🟦🟦🟩🟩🟦⬛
-    ⬛🟦🟦🟩🟩🟩🟦⬛
-    ⬛🟦🟦🟩🟩🟩🟦⬛
-    ⬛🟦🟦🟩🟩🟩🟦⬛
-    ⬛⬛🟦🟦🟩🟦⬛⬛
-    ⬛⬛⬛🟦🟦🟦⬛⬛
     
     Now, generate art for:
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    
-    # ✅ [핵심 변경 2] 토큰 수 대폭 증가 (500 -> 1500)
-    # 10x12 그리드를 그리기엔 500은 너무 부족했습니다. 1500이면 충분합니다.
-    payload = {
-        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
-        "generationConfig": {
-            "temperature": 0.4, 
-            "maxOutputTokens": 1500  # 여기가 범인이었습니다! 늘렸습니다.
-        }
-    }
-    
-    try:
-        logger.info(f"🤖 {target_model} 생성 시작 (토큰 1500)...")
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
-        
-        if response.status_code == 200:
-            result = response.json()
-            if 'candidates' in result and result['candidates']:
-                # 안전하게 텍스트 추출
-                parts = result['candidates'][0]['content']['parts']
-                if parts and 'text' in parts[0]:
-                    text = parts[0]['text']
-                    logger.info(f"✅ 생성 성공!")
-                    return text.strip()
-                else:
-                     logger.warning("⚠️ 모델 응답에 텍스트가 없습니다.")
-                     return "🎨 (생성 오류) 모델이 빈 응답을 보냈습니다."
-            else:
-                logger.warning("⚠️ candidates가 비어있습니다.")
-                return "🎨 (생성 오류) 모델 응답 형식이 올바르지 않습니다."
-        
-        # 429(속도제한) 등 에러 처리
-        elif response.status_code == 429:
-            logger.warning(f"⚠️ 속도 제한(429) 걸림")
-            return "🎨 (사용량 초과) 잠시 후 다시 시도해주세요. (구글 API 제한)"
-        else:
-            logger.error(f"❌ 통신 실패: {response.status_code} - {response.text}")
-            return f"🎨 (AI 통신 오류: {response.status_code}) 잠시 후 다시 시도해주세요."
+    # 🎯 전략: 
+    # 1. 2.5-Flash 시도 
+    # 2. (500 에러 시) 2초 쉬고 2.5-Flash 재시도
+    # 3. (그래도 안 되면) 1.5-Flash (안정형)로 교체
 
-    except Exception as e:
-        logger.error(f"❌ 시스템 에러: {e}")
-        return "🎨 (서버 내부 오류) 잠시 후 다시 시도해주세요."
+    models_to_try = [
+        ("models/gemini-2.5-flash", 5000),  # 1타: 최신형 (토큰 5000)
+        ("models/gemini-2.5-flash", 5000),  # 2타: 재시도 (잠깐 쉬고)
+        ("models/gemini-1.5-flash", 8192)   # 3타: 안정형 (토큰 넉넉함)
+    ]
+
+    for i, (model_name, max_tokens) in enumerate(models_to_try):
+        
+        # 재시도(2번째 시도)일 경우, 잠깐 쉼 (Back-off strategy)
+        if i == 1:
+            logger.info("⏳ 500 에러 발생. 2초 대기 후 재시도합니다...")
+            time.sleep(2.0)
+        
+        # 백업 모델(3번째 시도)일 경우 로그
+        if i == 2:
+            logger.info("⚠️ 2.5 모델 불안정. 1.5 모델로 교체 투입!")
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={GOOGLE_API_KEY}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
+            "generationConfig": {
+                "temperature": 0.4, 
+                "maxOutputTokens": max_tokens
+            }
+        }
+
+        try:
+            logger.info(f"🤖 [{i+1}차 시도] {model_name} 요청 중...")
+            response = requests.post(url, headers=headers, data=json.dumps(payload))
+
+            if response.status_code == 200:
+                result = response.json()
+                if 'candidates' in result and result['candidates']:
+                    text = result['candidates'][0]['content']['parts'][0]['text']
+                    logger.info(f"✅ 성공! (Used: {model_name})")
+                    # 성공하면 바로 반환 (반복문 종료)
+                    display_name = model_name.replace("models/", "").upper()
+                    return text.strip(), display_name
+            
+            # 500(서버 에러) or 429(과부하) -> 다음 시도로 넘어감 (continue)
+            logger.warning(f"⚠️ 실패 (Code: {response.status_code}) - {response.text[:100]}...")
+            continue 
+
+        except Exception as e:
+            logger.error(f"❌ 통신 에러: {e}")
+            continue
+
+    # 모든 시도가 실패했을 때
+    return "🎨 (서버 과부하) 구글 AI 서버가 응답하지 않습니다. 잠시 후 천천히 다시 시도해주세요.", "System Error"
 
 # =========================================================
 # 🔐 카카오 토큰 관리
@@ -184,9 +184,9 @@ def refresh_kakao_token():
         return False
 
 # =========================================================
-# 📨 카카오 전송 로직 (단일 결과)
+# 📨 카카오 전송 로직
 # =========================================================
-async def send_kakao_logic(final_art: str, original_prompt: str):
+async def send_kakao_logic(final_art: str, original_prompt: str, model_used: str):
     global CURRENT_ACCESS_TOKEN
     
     if not CURRENT_ACCESS_TOKEN:
@@ -194,8 +194,7 @@ async def send_kakao_logic(final_art: str, original_prompt: str):
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     
-    # 배틀 모드가 아니므로 심플하게 전송
-    final_message = f"🎨 t3xtart 작품 도착!\n(주제: {original_prompt})\n\n{final_art}\n\n(Painted by: Gemini-2.5-Flash)"
+    final_message = f"🎨 t3xtart 작품 도착!\n(주제: {original_prompt})\n\n{final_art}\n\n(Artist: {model_used})"
 
     def try_post(token):
         headers = {"Authorization": f"Bearer {token}"}
@@ -260,7 +259,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "8.0-flash-solo"}
+                "serverInfo": {"name": "t3xtart", "version": "10.0-retry-system"}
             }
         })
 
@@ -293,11 +292,11 @@ async def handle_sse_post(request: Request):
         if tool_name == "generate_and_send_art":
             user_prompt = args.get("prompt", "")
             
-            # 1. 2.5-Flash 단독 실행
-            art_content = generate_art_with_gemini(user_prompt)
+            # 1. 오뚝이 시스템 가동
+            art_content, model_used = generate_art_with_gemini(user_prompt)
             
             # 2. 카톡 전송
-            success, msg = await send_kakao_logic(art_content, user_prompt)
+            success, msg = await send_kakao_logic(art_content, user_prompt, model_used)
             
             result_text = "✅ 작품 생성 및 전송 완료!" if success else f"❌ 실패: {msg}"
             

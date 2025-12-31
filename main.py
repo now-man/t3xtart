@@ -27,81 +27,25 @@ app.add_middleware(
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # =========================================================
-# 🕵️‍♂️ [지능형 스카우터] 쓸 수 있는 '최고의 모델' 2개 찾기
+# 🧠 [단독 모드] Gemini 2.5 Flash + 충분한 토큰 확보
 # =========================================================
-def get_battle_candidates():
-    """
-    구글 API에 접속해 현재 사용 가능한 모델 리스트를 받아온 뒤,
-    'Pro'급과 'Flash'급 모델 중 가장 적합한 2개를 선별합니다.
-    """
+def generate_art_with_gemini(user_prompt: str):
     if not GOOGLE_API_KEY:
-        logger.error("❌ API 키가 없습니다.")
-        return []
+        return "❌ 서버 설정 오류: API 키 없음"
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GOOGLE_API_KEY}"
-    try:
-        res = requests.get(url)
-        if res.status_code != 200:
-            logger.error(f"❌ 모델 리스트 조회 실패: {res.text}")
-            return []
-            
-        data = res.json()
-        all_models = [
-            m['name'] for m in data.get('models', []) 
-            if 'generateContent' in m.get('supportedGenerationMethods', [])
-        ]
-        
-        # [엄격한 필터링] 멍청한 모델(nano, gemma) 절대 사절
-        # 우선순위: 1.5 Pro > 1.5 Flash > 1.0 Pro
-        
-        pro_models = [m for m in all_models if '1.5-pro' in m and 'vision' not in m]
-        flash_models = [m for m in all_models if '1.5-flash' in m and 'vision' not in m]
-        legacy_pro = [m for m in all_models if 'gemini-pro' in m and 'vision' not in m]
-        
-        candidates = []
-        
-        # 1번 선수: 지능형 (Pro 계열 최신)
-        if pro_models:
-            candidates.append(pro_models[0]) # 리스트의 첫 번째(보통 최신)
-        elif legacy_pro:
-            candidates.append(legacy_pro[0])
-            
-        # 2번 선수: 속도형 (Flash 계열 최신)
-        if flash_models:
-            candidates.append(flash_models[0])
-            
-        # 만약 리스트가 비었다면(권한 문제 등), 있는 것 중 아무거나 'gemini' 들어간 걸로 채움
-        if len(candidates) < 2:
-            others = [m for m in all_models if 'gemini' in m and m not in candidates]
-            candidates.extend(others[:2-len(candidates)])
-            
-        logger.info(f"⚔️ [배틀 참가 선수 확정]: {candidates}")
-        return candidates
+    # ✅ [핵심 변경 1] 사용자 요청대로 '2.5-flash' 모델 고정
+    # (참고: 이 모델은 최신 실험 버전이라 가끔 불안정할 수 있지만, 속도는 빠릅니다.)
+    target_model = "models/gemini-2.5-flash"
 
-    except Exception as e:
-        logger.error(f"❌ 스카우팅 에러: {e}")
-        return []
-
-# =========================================================
-# 🧠 [배틀 모드] 자동 선발된 모델로 생성
-# =========================================================
-def generate_art_battle_mode(user_prompt: str):
-    # 1. 선수 선발
-    battle_models = get_battle_candidates()
-    
-    if not battle_models:
-        return [("❌ 사용 가능한 Gemini 모델을 찾지 못했습니다. (API Key 권한 확인)", "System Error")]
-
-    # [프롬프트] 픽셀 아트 전문가 모드
     system_prompt = """
     Role: You are a master of 'Emoji Pixel Art'. 
-    Task: Convert the user's request into a strict 10x12 grid art.
+    Task: Convert the user's request into a **STRICT 10x12 GRID** art.
 
-    [CRITICAL RULES - DO NOT BREAK]
-    1. 📐 MUST fill the ENTIRE 10x12 grid. Do not output partial images or give up mid-way.
-    2. 🧱 Use colored blocks (⬛⬜🟥🟦🟩🟨🟧🟫) to construct the main shape.
-    3. 🎨 Use specific emojis ONLY for crucial details (e.g., eyes, wings).
-    4. 🚫 NO explanation text. Output ONLY the grid string.
+    [CRITICAL RULES - MUST FOLLOW]
+    1. ⚠️ **MUST COMPLETE THE GRID**: You MUST generate the full 12 rows. Do NOT stop mid-way. Do not output partial images.
+    2. 🧱 **Structure**: Use colored blocks (⬛⬜🟥🟦🟩🟨🟧🟫) to construct the main shape.
+    3. 🎨 **Details**: Use specific emojis ONLY for crucial details (e.g., eyes, stars).
+    4. 🚫 **Clean Output**: Output ONLY the grid string. No introduction text.
 
     [Reference Examples]
     User: "Ramen"
@@ -148,55 +92,63 @@ def generate_art_battle_mode(user_prompt: str):
     ❄️⬜🟥⬜🟥⬜❄️
     ❄️🟥⬜🟥⬜🟥❄️
     ❄️❄️❄️❄️❄️❄️❄️
-    
-    User: "Monkey under leaf"
+    User: "Earth"
     Output:
-    🌿🌿🌿🌿🌿🌿🌿🌿
-    🌿🌿🌿🌿🌿🌿🌿🌿
-    🌿🌿🙈🙈🙈🙈🌿🌿
-    🌿🌿🙈🐵🐵🙈🌿🌿
-    🌿🌿💪🟫🟫💪🌿🌿
-    🌿🌿🌿🟫🟫🌿🌿🌿
-
+    ⬛⬛⬛🟦🟦🟦⬛⬛
+    ⬛⬛🟦🟦🟩🟩🟦⬛
+    ⬛🟦🟦🟩🟩🟩🟦⬛
+    ⬛🟦🟦🟩🟩🟩🟦⬛
+    ⬛🟦🟦🟩🟩🟩🟦⬛
+    ⬛⬛🟦🟦🟩🟦⬛⬛
+    ⬛⬛⬛🟦🟦🟦⬛⬛
+    
     Now, generate art for:
     """
 
-    battle_results = []
-
-    for model_name in battle_models:
-        # model_name은 이미 'models/...' 형태임
-        url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={GOOGLE_API_KEY}"
-        headers = {"Content-Type": "application/json"}
-        
-        payload = {
-            "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 500}
+    url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
+    # ✅ [핵심 변경 2] 토큰 수 대폭 증가 (500 -> 1500)
+    # 10x12 그리드를 그리기엔 500은 너무 부족했습니다. 1500이면 충분합니다.
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
+        "generationConfig": {
+            "temperature": 0.4, 
+            "maxOutputTokens": 1500  # 여기가 범인이었습니다! 늘렸습니다.
         }
+    }
+    
+    try:
+        logger.info(f"🤖 {target_model} 생성 시작 (토큰 1500)...")
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
         
-        try:
-            logger.info(f"🤖 {model_name} 생성 시도...")
-            response = requests.post(url, headers=headers, data=json.dumps(payload))
-            if response.status_code == 200:
-                result = response.json()
-                if 'candidates' in result and result['candidates']:
-                    text = result['candidates'][0]['content']['parts'][0]['text']
-                    battle_results.append((text.strip(), model_name))
-                    logger.info(f"✅ {model_name} 성공!")
+        if response.status_code == 200:
+            result = response.json()
+            if 'candidates' in result and result['candidates']:
+                # 안전하게 텍스트 추출
+                parts = result['candidates'][0]['content']['parts']
+                if parts and 'text' in parts[0]:
+                    text = parts[0]['text']
+                    logger.info(f"✅ 생성 성공!")
+                    return text.strip()
                 else:
-                    battle_results.append(("(내용 없음)", model_name))
+                     logger.warning("⚠️ 모델 응답에 텍스트가 없습니다.")
+                     return "🎨 (생성 오류) 모델이 빈 응답을 보냈습니다."
             else:
-                # 에러 메시지 간소화
-                error_msg = f"Error {response.status_code}"
-                if response.status_code == 404: error_msg = "Not Found (404)"
-                if response.status_code == 403: error_msg = "Permission Denied (403)"
-                battle_results.append((f"({error_msg})", model_name))
-                logger.warning(f"⚠️ {model_name} 실패: {response.status_code}")
+                logger.warning("⚠️ candidates가 비어있습니다.")
+                return "🎨 (생성 오류) 모델 응답 형식이 올바르지 않습니다."
+        
+        # 429(속도제한) 등 에러 처리
+        elif response.status_code == 429:
+            logger.warning(f"⚠️ 속도 제한(429) 걸림")
+            return "🎨 (사용량 초과) 잠시 후 다시 시도해주세요. (구글 API 제한)"
+        else:
+            logger.error(f"❌ 통신 실패: {response.status_code} - {response.text}")
+            return f"🎨 (AI 통신 오류: {response.status_code}) 잠시 후 다시 시도해주세요."
 
-        except Exception as e:
-            battle_results.append(("(통신 에러)", model_name))
-            logger.error(f"❌ {model_name} 에러: {e}")
-            
-    return battle_results
+    except Exception as e:
+        logger.error(f"❌ 시스템 에러: {e}")
+        return "🎨 (서버 내부 오류) 잠시 후 다시 시도해주세요."
 
 # =========================================================
 # 🔐 카카오 토큰 관리
@@ -231,7 +183,10 @@ def refresh_kakao_token():
     except:
         return False
 
-async def send_kakao_battle_result(results_list: list, original_prompt: str):
+# =========================================================
+# 📨 카카오 전송 로직 (단일 결과)
+# =========================================================
+async def send_kakao_logic(final_art: str, original_prompt: str):
     global CURRENT_ACCESS_TOKEN
     
     if not CURRENT_ACCESS_TOKEN:
@@ -239,12 +194,8 @@ async def send_kakao_battle_result(results_list: list, original_prompt: str):
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     
-    final_message = f"🎨 t3xtart 모델 배틀\n(주제: {original_prompt})\n\n"
-    for art, model_name in results_list:
-        # 모델명 깔끔하게 (models/gemini-1.5-pro-latest -> GEMINI-1.5-PRO...)
-        short_name = model_name.replace("models/", "").split("-00")[0].upper()
-        final_message += f"➖➖➖➖➖➖➖➖\n🏆 [{short_name}]\n\n{art}\n\n"
-    final_message += "➖➖➖➖➖➖➖➖"
+    # 배틀 모드가 아니므로 심플하게 전송
+    final_message = f"🎨 t3xtart 작품 도착!\n(주제: {original_prompt})\n\n{final_art}\n\n(Painted by: Gemini-2.5-Flash)"
 
     def try_post(token):
         headers = {"Authorization": f"Bearer {token}"}
@@ -273,8 +224,8 @@ async def send_kakao_battle_result(results_list: list, original_prompt: str):
 # =========================================================
 # 📝 도구 설명
 # =========================================================
-TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제를 받아, 최고의 Gemini 모델들이 경쟁하여 생성한 이모지 아트를 카카오톡으로 전송합니다."
-INPUT_DESCRIPTION = "사용자의 요청 내용 (예: '나뭇잎에 덮인 원숭이 그려줘')"
+TOOL_DESCRIPTION = "사용자가 원하는 그림의 주제(예: '라면 그려줘', '사랑해 점자')를 텍스트로 받아 t3xtart 엔진으로 전달합니다."
+INPUT_DESCRIPTION = "사용자의 요청 내용 그대로 입력하세요. (AI가 직접 이모지 아트를 생성하지 마십시오. 단지 요청 텍스트만 전달하세요.)"
 
 # ---------------------------------------------------------
 # 라우팅
@@ -309,7 +260,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "7.0-auto-battle"}
+                "serverInfo": {"name": "t3xtart", "version": "8.0-flash-solo"}
             }
         })
 
@@ -341,9 +292,14 @@ async def handle_sse_post(request: Request):
 
         if tool_name == "generate_and_send_art":
             user_prompt = args.get("prompt", "")
-            results = generate_art_battle_mode(user_prompt)
-            success, msg = await send_kakao_battle_result(results, user_prompt)
-            result_text = "✅ 모델 성능 테스트 결과 전송 완료!" if success else f"❌ 실패: {msg}"
+            
+            # 1. 2.5-Flash 단독 실행
+            art_content = generate_art_with_gemini(user_prompt)
+            
+            # 2. 카톡 전송
+            success, msg = await send_kakao_logic(art_content, user_prompt)
+            
+            result_text = "✅ 작품 생성 및 전송 완료!" if success else f"❌ 실패: {msg}"
             
             return JSONResponse({
                 "jsonrpc": "2.0", "id": msg_id,

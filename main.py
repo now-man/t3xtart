@@ -27,82 +27,111 @@ app.add_middleware(
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # =========================================================
-# 🧠 [핵심] 사용 가능한 모델 '자동 사냥' 로직
+# 🧠 [업그레이드] 고퀄리티 아트 생성 엔진
 # =========================================================
-def get_available_models_from_google():
-    """구글 API에 직접 물어봐서 현재 키로 쓸 수 있는 모델 리스트를 가져옵니다."""
-    if not GOOGLE_API_KEY:
-        return []
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GOOGLE_API_KEY}"
-    try:
-        res = requests.get(url)
-        if res.status_code == 200:
-            data = res.json()
-            # 'generateContent' 기능이 있는 모델만 필터링
-            models = [
-                m['name'] for m in data.get('models', []) 
-                if 'generateContent' in m.get('supportedGenerationMethods', [])
-            ]
-            # 우선순위 정렬: 'flash'가 들어간걸 먼저, 그 다음 'pro'
-            # (이유: flash가 빠르고 싸고 에러가 적음)
-            models.sort(key=lambda x: (0 if 'flash' in x else 1, 0 if 'pro' in x else 1))
-            
-            logger.info(f"📋 [자동 감지된 모델 목록]: {models}")
-            return models
-        else:
-            logger.error(f"❌ 모델 리스트 가져오기 실패: {res.text}")
-            return []
-    except Exception as e:
-        logger.error(f"❌ 연결 에러: {e}")
-        return []
-
 def generate_art_with_gemini(user_prompt: str):
     if not GOOGLE_API_KEY:
         return "❌ 서버 설정 오류: GOOGLE_API_KEY 없음"
 
-    # 1. 구글한테 사용 가능한 모델 리스트를 받아옵니다.
-    candidate_models = get_available_models_from_google()
-    
-    if not candidate_models:
-        return "🎨 (오류) 사용 가능한 Gemini 모델을 찾을 수 없습니다. API 키를 확인해주세요."
-
+    # [핵심] AI에게 주는 강력한 지령 (Few-Shot Prompting)
+    # 예시를 직접 보여줘서 이대로만 하게 강제합니다.
     system_prompt = """
-    You are a 'Pixel Emoji Artist'. convert the user's request into a 10x12 grid emoji art.
-    RULES:
-    1. DO NOT fill background with the subject emoji.
-    2. Use COLORED BLOCKS (🟦,🟥,🟨,⬜,⬛) or Shapes to DRAW the subject.
-    3. Output ONLY the emoji string.
+    Role: You are a master of 'Emoji Pixel Art'. 
+    Task: Convert the user's request into a strict 10x12 grid art using mostly square blocks.
+
+    [STRICT RULES]
+    1. ❌ DO NOT output simple emojis (e.g., 🥩). You must DRAW the shape using colored blocks.
+    2. 🧱 Use these blocks mainly: ⬛(Black), ⬜(White), 🟥(Red), 🟦(Blue), 🟩(Green), 🟨(Yellow), 🟧(Orange), 🟫(Brown).
+    3. 🎨 You can use specific emojis for details (e.g., 👁️ for eyes, ⚡ for spark), but the main body must be blocks.
+    4. 📐 Output format: ONLY the grid string. No introduction. No text.
+
+    [High-Quality Examples]
+
+    User: "Ramen"
+    Output:
+    ⬛⬛⬛⬛⬛⬛⬛⬛
+    ⬛⬛🍜🍜🍜🍜⬛⬛
+    ⬛🍜🟨〰️〰️🟨🍜⬛
+    ⬛🍜🍥🥚🍖🥚🍜⬛
+    ⬛🍜🟨🟨🟨🟨🍜⬛
+    ⬛⬛🍜🍜🍜🍜⬛⬛
+    ⬛⬛⬛⬛⬛⬛⬛⬛
+
+    User: "Blue Star"
+    Output:
+    ⬛⬛⬛🟦⬛⬛⬛
+    ⬛⬛🟦🟦🟦⬛⬛
+    ⬛🟦🟦🟦🟦🟦⬛
+    ⬛⬛🟦🟦🟦⬛⬛
+    ⬛🟦⬛⬛⬛🟦⬛
+    
+    User: "Burning Jellyfish"
+    Output:
+    🌊🌊🌊🌊🌊🌊🌊
+    🌊🌊🔥🔥🔥🔥🌊
+    🌊🔥👁️🔥👁️🔥🌊
+    🌊🔥🔥👄🔥🔥🌊
+    🌊⚡️⚡️⚡️⚡️⚡️🌊
+    🌊⚡️🌊⚡️🌊⚡️🌊
+    
+    User: "Frozen Pork Belly" (Concept: Pink/Red meat layers with Ice)
+    Output:
+    ❄️❄️❄️❄️❄️❄️❄️
+    ❄️🥩🟥⬜🟥⬜❄️
+    ❄️🟥⬜🟥⬜🟥❄️
+    ❄️⬜🟥⬜🟥⬜❄️
+    ❄️🟥⬜🟥⬜🟥❄️
+    ❄️❄️❄️❄️❄️❄️❄️
+
+    Now, generate art for the user's request.
     """
 
-    # 2. 리스트에 있는 모델을 하나씩 순서대로 시도합니다.
-    for model_name in candidate_models:
-        # url 생성 (model_name에는 이미 'models/'가 포함되어 있음)
-        url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={GOOGLE_API_KEY}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 300}
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, data=json.dumps(payload))
-            if response.status_code == 200:
-                result = response.json()
-                if 'candidates' in result and result['candidates']:
-                    text = result['candidates'][0]['content']['parts'][0]['text']
-                    logger.info(f"✅ 생성 성공! (사용 모델: {model_name})")
-                    return text.strip()
-            
-            # 실패 시 로그 남기고 다음 모델로 (404, 429, 403 등)
-            logger.warning(f"⚠️ 실패 ({model_name}): {response.status_code} - {response.text[:100]}...")
-            continue 
+    # ✅ 정식 모델명 고정 (새 키가 있다면 무조건 됩니다)
+    # 1.5 Flash가 가성비/지능 밸런스가 아트 생성에 가장 좋습니다.
+    target_model = "models/gemini-1.5-flash"
 
-        except Exception as e:
-            logger.error(f"❌ 에러 ({model_name}): {e}")
-            continue
-            
-    return "🎨 (전체 실패) 가능한 모든 모델을 시도했으나 응답하지 않습니다. (429는 잠시 후 다시 시도하세요)"
+    url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
+    # temperature를 낮춰서(0.3) AI가 창의성보다 '규칙'을 따르게 합니다.
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 400}
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'candidates' in result and result['candidates']:
+                text = result['candidates'][0]['content']['parts'][0]['text']
+                logger.info(f"✅ 생성 성공 ({target_model})")
+                return text.strip()
+        
+        # 만약 Flash가 안 되면 Pro로 한 번 더 시도
+        logger.warning(f"⚠️ Flash 실패 ({response.status_code}). Pro 모델 시도.")
+        return try_fallback_model(user_prompt, system_prompt)
+
+    except Exception as e:
+        logger.error(f"❌ 에러: {e}")
+        return "🎨 (서버 에러) 잠시 후 다시 시도해주세요."
+
+def try_fallback_model(user_prompt, system_prompt):
+    """Flash 실패 시 Pro 모델(더 똑똑함)로 재시도"""
+    target_model = "models/gemini-1.5-pro"
+    url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}]
+    }
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(payload))
+        if res.status_code == 200:
+            return res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+    except:
+        pass
+    return "🎨 (오류) API 키를 확인해주세요."
 
 # =========================================================
 # 🔐 카카오 토큰 관리
@@ -208,7 +237,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "3.8"}
+                "serverInfo": {"name": "t3xtart", "version": "4.0"}
             }
         })
 

@@ -25,7 +25,7 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🔐 [복구 완료] 카카오 토큰 관리 (Client Secret 포함)
+# 🔐 카카오 토큰 관리 (완벽함 - 유지)
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -33,8 +33,8 @@ def refresh_kakao_token():
     global CURRENT_ACCESS_TOKEN
     rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
-    client_secret = os.environ.get("KAKAO_CLIENT_SECRET") # 필수!
-
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET") 
+    
     if not rest_api_key or not refresh_token:
         return False
 
@@ -45,7 +45,6 @@ def refresh_kakao_token():
         "refresh_token": refresh_token
     }
     
-    # 비밀키가 있으면 반드시 포함 (사용자님 환경 필수)
     if client_secret:
         data["client_secret"] = client_secret
     
@@ -92,25 +91,43 @@ async def send_kakao_logic(content: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 🧠 [뇌 개조] "배경과 피사체 분리" 프롬프트
+# 🧠 [뇌 개조] 강제 사고 유도 (CoT) 프롬프트
 # =========================================================
-# 뱀 그리기 실패를 교훈 삼아, '명암'과 '대비'를 강조했습니다.
-HIDDEN_INSTRUCTION = """
-[ROLE] You are a 'Pixel Emoji Artist'. 
-Your goal is to visualize the user's request into a strict 10x12 grid art.
+PLAN_INSTRUCTION = """
+Describe your visual strategy BEFORE drawing.
+1. Identify the Subject Color (e.g., Frog=Green 🟩) and Background Color (e.g., Water=Blue 🟦).
+2. Explain how you will draw the SILHOUETTE of the subject using blocks.
+(Example: "I will use Green blocks to draw a frog shape in the center, and fill the rest with Blue blocks.")
+"""
 
-[CRITICAL DESIGN RULES - MUST FOLLOW]
-1. 📐 **Grid Layout**: You MUST generate a 10-row by 12-column grid. Use `\\n` for line breaks.
-2. 🎭 **CONTRAST RULE (Most Important)**: 
-   - The **SUBJECT** (e.g., Snake) must use SOLID BLOCKS (🟩, 🟥, 🟦, 🟨).
-   - The **BACKGROUND** (e.g., Grass) must use DIFFERENT emojis (🌿, ⬛, ☁️).
-   - **NEVER** fill the entire grid with the same emoji.
-3. 🧱 **Construction**: Draw the silhouette/shape of the subject first, then fill the background.
-4. 🚫 **No Chatter**: The 'content' argument must contain ONLY the art string.
+ART_INSTRUCTION = """
+[THE CANVAS] 10 rows x 12 columns Grid.
 
-[Visual Logic Examples - MEMORIZE THIS PATTERN]
+[STRICT DRAWING RULES]
+1. 🧱 **BLOCKS FIRST**: You MUST use colored blocks (⬛⬜🟥🟦🟩🟨🟧🟫) for the main shape.
+2. 🎭 **CONTRAST**: The Subject and Background MUST be different colors.
+   - ❌ BAD: Filling all with 🌸.
+   - ✅ GOOD: 🌸 background, 🟩 Frog shape in middle.
+3. 📐 **SHAPE**: Draw a recognizable shape (pixel art style).
 
-Case 1: "Green Snake in Grass" (Subject: Green Blocks / Background: Leaf Emojis)
+[Examples]
+User: "Flower Frog" (Green Frog + Pink Flower BG)
+🌸🌸🌸🌸🌸🌸🌸🌸🌸🌸
+🌸🌸🟩🟩🟩🟩🟩🌸🌸🌸
+🌸🌸🟩⬜🟩⬜🟩🌸🌸🌸
+🌸🌸🟩🟩🟩🟩🟩🌸🌸🌸
+🌸🌸🟩🦵🏽🌸🦵🏽🟩🌸🌸🌸
+🌸🌸🌸🌸🌸🌸🌸🌸🌸🌸
+
+User: "Night Moon" (Yellow Moon + Black BG)
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
+⬛⬛⬛⬛🟨🟨⬛⬛⬛⬛
+⬛⬛⬛🟨🟨🟨🟨⬛⬛⬛
+⬛⬛⬛🟨🟨🟨🟨⬛⬛⬛
+⬛⬛⬛⬛🟨🟨⬛⬛⬛⬛
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
+
+User: "Green Snake in Grass" (Subject: Green Blocks / Background: Leaf Emojis)
 (Notice how the snake is distinct from the grass)
 🌿🌿🌿🌿🌿🌿🌿🌿🌿🌿
 🌿🌿🟩🟩🟩🟩🟩🌿🌿🌿
@@ -123,7 +140,7 @@ Case 1: "Green Snake in Grass" (Subject: Green Blocks / Background: Leaf Emojis)
 🌿🌿🌿🌿🌿🌿🌿🌿🌿🌿
 🌿🌿🌿🌿🌿🌿🌿🌿🌿🌿 
 
-Case 2: "Frozen Pork Belly" (Pink/Red layers + Ice)
+User: "Frozen Pork Belly" (Pink/Red layers + Ice)
 ❄️❄️❄️❄️❄️❄️❄️❄️❄️❄️
 ❄️❄️🥩🟥⬜🟥⬜❄️❄️❄️
 ❄️❄️🟥⬜🟥⬜🟥❄️❄️❄️
@@ -131,7 +148,7 @@ Case 2: "Frozen Pork Belly" (Pink/Red layers + Ice)
 ❄️❄️🟥⬜🟥⬜🟥❄️❄️❄️
 ❄️❄️❄️❄️❄️❄️❄️❄️❄️❄️
 
-Case 3: "Ramen" (Bowl + Noodles)
+User: "Ramen" (Bowl + Noodles)
 ⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
 ⬛⬛🍜🍜🍜🍜🍜⬛⬛⬛
 ⬛🍜🟨〰️〰️〰️🟨🍜⬛⬛
@@ -140,7 +157,7 @@ Case 3: "Ramen" (Bowl + Noodles)
 ⬛⬛🍜🍜🍜🍜🍜⬛⬛⬛
 ⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
 
-Case 4: "Burning Jellyfish" (Fire Dome + Tentacles)
+User: "Burning Jellyfish" (Fire Dome + Tentacles)
 🌊🌊🌊🌊🌊🌊🌊
 🌊🌊🔥🔥🔥🔥🌊
 🌊🔥👁️🔥👁️🔥🌊
@@ -149,9 +166,7 @@ Case 4: "Burning Jellyfish" (Fire Dome + Tentacles)
 🌊⚡️🌊⚡️🌊⚡️🌊
 🌊🌊🌊🌊🌊🌊🌊
 
-
-
-Generate the art following this high-contrast style.
+Generate the final grid string here.
 """
 
 # ---------------------------------------------------------
@@ -187,7 +202,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "2.0-fixed"}
+                "serverInfo": {"name": "t3xtart", "version": "3.0-brain-upgrade"}
             }
         })
 
@@ -197,16 +212,22 @@ async def handle_sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "deliver_kakao_message",
-                    "description": "Generate high-quality pixel emoji art based on user text and send it to KakaoTalk.",
+                    "description": "Visualize the user's request as a high-quality 10x12 Pixel Emoji Art and send it to KakaoTalk.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "content": {
+                            # 1. 계획을 먼저 세우게 강제함 (중요!)
+                            "design_plan": {
                                 "type": "string",
-                                "description": HIDDEN_INSTRUCTION
+                                "description": PLAN_INSTRUCTION
+                            },
+                            # 2. 계획된 대로 그리게 함
+                            "final_art": {
+                                "type": "string",
+                                "description": ART_INSTRUCTION
                             }
                         },
-                        "required": ["content"]
+                        "required": ["design_plan", "final_art"] # 둘 다 필수!
                     }
                 }]
             }
@@ -218,8 +239,14 @@ async def handle_sse_post(request: Request):
         args = params.get("arguments", {})
 
         if tool_name == "deliver_kakao_message":
-            content = args.get("content", "")
+            # design_plan은 AI 생각 정리용이므로 로그에만 찍고 버림
+            plan = args.get("design_plan", "")
+            logger.info(f"🤖 AI 설계도: {plan}")
+            
+            # 실제 전송은 final_art만
+            content = args.get("final_art", "")
             success, msg = await send_kakao_logic(content)
+            
             result_text = "✅ 전송 성공!" if success else f"❌ 실패: {msg}"
             return JSONResponse({
                 "jsonrpc": "2.0", "id": msg_id,

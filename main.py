@@ -73,7 +73,7 @@ async def send_kakao_logic(content: str):
                 "object_type": "text",
                 "text": f"🎨 t3xtart 도착!\n\n{content}",
                 "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
-                "button_title": "자세히 보기"
+                "button_title": "작품 보기"
             })
         }
         return requests.post(url, headers=headers, data=payload)
@@ -91,55 +91,93 @@ async def send_kakao_logic(content: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 🧠 [뇌 개조] "추상화 및 아이콘화" (Abstraction & Iconography)
+# 🧠 [뇌 개조] 아트 디렉터 프롬프트 (설계 -> 시공)
 # =========================================================
-# 특정 사물 예시를 외우는 게 아니라, '단순화하는 원리'를 가르칩니다.
 
-LOGIC_INSTRUCTION = """
-[TASK] Analyze the user's request and break it down into 'Geometric Primitives' for a 10x12 low-res grid.
-You act as an 'Icon Designer'.
-
-[ABSTRACTION LOGIC]
-1. **Deconstruct**: Break the subject into max 2-3 parts. (e.g., Saturn = Circle + Line).
-2. **Palette**: Pick ONE main color for the subject, ONE contrasting color for background.
-3. **Geometry**:
-   - Round Object -> Use a 'Plus (+)' or 'Diamond (◆)' shape block cluster.
-   - Square/Can Object -> Use a Rectangle block cluster.
-   - Numbers/Letters -> Use 1-block stroke width.
-
-[OUTPUT FORMAT]
-String describing: "Subject=[Shape]+[Color], Background=[Color], Key Feature=[Emoji]"
+# 1. 기획 단계: 여기서 색깔과 구도를 미리 정하게 함
+PLANNING_PROMPT = """
+You are the 'Art Director'. Plan the pixel art before drawing.
+1. **Canvas Size**: Recommend a grid size (e.g., 10x10, 8x8, 12x15) best for the subject.
+2. **Palette Definition**: Assign emojis to roles.
+   - Main Subject (Block): Must use SOLID colors (🟩, 🟥, 🟦, 🟨, 🟧, 🟫, ⬛, ⬜).
+   - Details (Icon): Use specific emojis (👀, 🌟, 🔥) sparingly.
+   - Background (Texture): Use atmospheric emojis (🌿, ☁️, 🌊, ⬛) or solid colors.
+3. **Layering Strategy**: How will you separate the subject from the background? (Contrast).
 """
 
-ART_INSTRUCTION = """
-[THE CANVAS] STRICT 10 rows x 12 columns Grid.
+# 2. 시공 단계: 기획서대로 진짜 타일을 깔아버림
+DRAWING_PROMPT = """
+You are the 'Tile Constructor'. Execute the plan into a final grid string.
 
-[ICONOGRAPHY RULES - HOW TO DRAW]
-1. 🧱 **BLOCKS over EMOJIS**: Use colored squares (🟥🟦🟩🟨🟧🟫⬛⬜) to build the main shape.
-   - Do NOT use a single emoji to represent the object. DRAW IT.
-2. 🍱 **CENTERING**: Draw the subject in the middle (rows 2-8, cols 2-9). Leave margins.
-3. ✂️ **NEGATIVE SPACE**: Do NOT fill the whole background if not necessary. Use ⬛ or ☁️ or ⬜ for empty space to make the subject pop.
-4. 🖍️ **STROKES**: For thin objects (numbers, letters, limbs), use a single line of blocks.
+[CONSTRUCTION RULES - STRICT]
+1. 🧱 **BLOCKS FIRST**: The Subject MUST be drawn primarily with COLORED SQUARES (e.g., 🟩 for Snake, 🟥 for Meat). Do NOT use the object's emoji (e.g., don't use 🐍 for the snake body, use 🟩).
+2. 🍱 **CLEAR SHAPE**: The subject must have a recognizable silhouette.
+3. 📐 **GRID ALIGNMENT**: Every row must have the SAME number of emojis/blocks. Use `\\n` for new lines.
+4. ❌ **NO LAZY FILLING**: Do not fill the whole grid with one emoji. There must be a Subject and a Background.
 
-[UNIVERSAL SHAPE LIBRARY]
-- **Circle/Sphere** (Planet, Face, Ball):
-  ⬛⬛🟨🟨⬛⬛
-  ⬛🟨🟨🟨🟨⬛
-  ⬛🟨🟨🟨🟨⬛
-  ⬛⬛🟨🟨⬛⬛
+[MASTERPIECE EXAMPLES - AIM FOR THIS QUALITY]
 
-- **Cylinder/Rectangle** (Can, Building, Cup):
-  ⬛⬛🟦🟦🟦⬛⬛
-  ⬛⬛🟦🟦🟦⬛⬛
-  ⬛⬛🟦🟦🟦⬛⬛
-  ⬛⬛🟦🟦🟦⬛⬛
+Case 1: "Green Snake" (Use 🟩 for Body, 🌿 for BG)
+🌿🌿🌿🌿🌿🌿🌿🌿
+🌿🌿🟩🟩🟩🟩🌿🌿
+🌿🌿🌿🌿🌿🟩🌿🌿
+🌿🌿🟩🟩🟩🟩🌿🌿
+🌿🌿🟩🌿🌿🌿🌿🌿
+🌿🌿🟩🟩👀👅🌿🌿
+🌿🌿🌿🌿🌿🌿🌿🌿
 
-- **Line/Cross** (Wings, Saturn Ring):
-  ⬜⬜⬜⬜⬜⬜
-  ⬜🟥🟥🟥🟥⬜ (Horizontal)
-  ⬜⬜⬜⬜⬜⬜
+Case 2: "Frozen Meat" (Use 🥩/🟥 for Meat, ❄️ for BG)
+❄️❄️❄️❄️❄️❄️❄️
+❄️🥩🟥⬜🟥⬜❄️
+❄️🟥⬜🟥⬜🟥❄️
+❄️⬜🟥⬜🟥⬜❄️
+❄️🟥⬜🟥⬜🟥❄️
+❄️❄️❄️❄️❄️❄️❄️
 
-Generate ONLY the grid string.
+Case 3: "Ramen" (Bowl Shape + Noodle Lines)
+⬛⬛⬛⬛⬛⬛⬛⬛⬛
+⬛⬛🍜🍜🍜🍜🍜⬛⬛
+⬛🍜🟨〰️〰️〰️🟨🍜⬛
+⬛🍜🍥🥚🍖🥚🍥🍜⬛
+⬛🍜🟨🟨🟨🟨🟨🍜⬛
+⬛⬛🍜🍜🍜🍜🍜⬛⬛
+⬛⬛⬛⬛⬛⬛⬛⬛⬛
+
+Case 4: "Burning Jellyfish" (Contrast: Fire vs Water)
+🌊🌊🌊🌊🌊🌊🌊
+🌊🌊🔥🔥🔥🔥🌊
+🌊🔥👁️🔥👁️🔥🌊
+🌊🔥🔥👄🔥🔥🌊
+🌊⚡️⚡️⚡️⚡️⚡️🌊
+🌊⚡️🌊⚡️🌊⚡️🌊
+🌊🌊🌊🌊🌊🌊🌊
+
+Case 5: "Earth" (Blue Circle + Green Continents)
+⬛⬛⬛🟦🟦🟦⬛⬛⬛
+⬛⬛🟦🟦🟩🟩🟦⬛⬛
+⬛🟦🟦🟩🟩🟩🟩🟦⬛
+⬛🟦🟦🟦🟩🟦🟦🟦⬛
+⬛🟩🟦🟦🟩🟩🟦🟦⬛
+⬛⬛🟦🟦🟩🟩🟦⬛⬛
+⬛⬛⬛🟦🟦🟦⬛⬛⬛
+
+Case 6: "Night Moon" (Yellow Moon + Black BG)
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
+⬛⬛⬛⬛🟨🟨⬛⬛⬛⬛
+⬛⬛⬛🟨🟨🟨🟨⬛⬛⬛
+⬛⬛⬛🟨🟨🟨🟨⬛⬛⬛
+⬛⬛⬛⬛🟨🟨⬛⬛⬛⬛
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
+
+Case 7: "67" (Random color numbers + Random color BG)
+⬛⬛🟥⬛⬛🟥🟥🟥⬛
+⬛🟥⬛🟥⬛🟥⬛🟥⬛
+⬛🟥⬛⬛⬛⬛⬛🟥⬛
+⬛🟥🟥🟥⬛⬛⬛🟥⬛
+⬛🟥⬛🟥⬛⬛⬛🟥⬛
+⬛⬛🟥⬛⬛⬛⬛🟥⬛
+
+Output ONLY the final grid string.
 """
 
 # ---------------------------------------------------------
@@ -175,7 +213,7 @@ async def handle_sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "4.0-abstraction"}
+                "serverInfo": {"name": "t3xtart", "version": "5.0-art-director"}
             }
         })
 
@@ -185,22 +223,20 @@ async def handle_sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "deliver_kakao_message",
-                    "description": "Convert user request into a minimalist 10x12 Pixel Art Icon and send to KakaoTalk.",
+                    "description": "Visualize user request into High-Quality Pixel Emoji Art. First plan the palette and grid, then draw.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            # 1. 시각적 분해 논리 (AI가 스스로 모양을 정의하게 함)
-                            "visual_logic": {
+                            "artistic_planning": {
                                 "type": "string",
-                                "description": LOGIC_INSTRUCTION
+                                "description": PLANNING_PROMPT
                             },
-                            # 2. 실제 그림
-                            "final_art": {
+                            "final_art_grid": {
                                 "type": "string",
-                                "description": ART_INSTRUCTION
+                                "description": DRAWING_PROMPT
                             }
                         },
-                        "required": ["visual_logic", "final_art"]
+                        "required": ["artistic_planning", "final_art_grid"]
                     }
                 }]
             }
@@ -212,11 +248,11 @@ async def handle_sse_post(request: Request):
         args = params.get("arguments", {})
 
         if tool_name == "deliver_kakao_message":
-            # AI의 생각 과정 로그 확인
-            logic = args.get("visual_logic", "")
-            logger.info(f"🤖 도안 설계: {logic}")
+            # AI의 기획 의도를 로그로 확인 (디버깅용)
+            plan = args.get("artistic_planning", "")
+            logger.info(f"🎨 Art Director's Plan:\n{plan}")
             
-            content = args.get("final_art", "")
+            content = args.get("final_art_grid", "")
             success, msg = await send_kakao_logic(content)
             
             result_text = "✅ 전송 성공!" if success else f"❌ 실패: {msg}"

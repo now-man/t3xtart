@@ -16,6 +16,7 @@ logger = logging.getLogger("t3xtart")
 
 app = FastAPI()
 
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,7 +26,7 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🔐 카카오 토큰 관리 (이건 완벽하니 그대로 유지)
+# 🔐 [수정됨] 비밀키(Client Secret)까지 챙기는 갱신 로직
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -33,49 +34,63 @@ def refresh_kakao_token():
     global CURRENT_ACCESS_TOKEN
     rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
-    
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET") # 추가된 부분
+
     if not rest_api_key or not refresh_token:
+        logger.error("토큰 갱신 실패: 환경변수 누락")
         return False
 
     url = "https://kauth.kakao.com/oauth/token"
+
     data = {
         "grant_type": "refresh_token",
         "client_id": rest_api_key,
         "refresh_token": refresh_token
     }
-    
+
+    # [중요] 비밀키가 환경변수에 있으면 같이 보냅니다.
+    if client_secret:
+        data["client_secret"] = client_secret
+
     try:
         res = requests.post(url, data=data)
         if res.status_code == 200:
             new_tokens = res.json()
             CURRENT_ACCESS_TOKEN = new_tokens.get("access_token")
+            logger.info("✅ 카카오 토큰 갱신 성공!")
             return True
-        return False
-    except:
+        else:
+            logger.error(f"토큰 갱신 실패: {res.text}")
+            return False
+    except Exception as e:
+        logger.error(f"에러: {e}")
         return False
 
 async def send_kakao_logic(content: str):
     global CURRENT_ACCESS_TOKEN
-    
+
     if not CURRENT_ACCESS_TOKEN:
-        refresh_kakao_token()
+        if not refresh_kakao_token():
+            return False, "서버 토큰 발급 실패"
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    
+
     def try_post(token):
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
             "template_object": json.dumps({
                 "object_type": "text",
-                "text": f"🎨 t3xtart 도착!\n\n{content}", # 심플하게 변경
+                "text": f"🎨 t3xtart 작품 도착!\n\n{content}\n\n(AI Generated)",
                 "link": {"web_url": "https://www.kakao.com", "mobile_web_url": "https://www.kakao.com"},
-                "button_title": "자세히 보기"
+                "button_title": "작품 자세히 보기"
             })
         }
         return requests.post(url, headers=headers, data=payload)
 
     res = try_post(CURRENT_ACCESS_TOKEN)
+
     if res.status_code == 401:
+        logger.info("토큰 만료 감지! 갱신 시도...")
         if refresh_kakao_token():
             res = try_post(CURRENT_ACCESS_TOKEN)
         else:
@@ -87,73 +102,60 @@ async def send_kakao_logic(content: str):
         return False, f"카카오 에러: {res.text}"
 
 # =========================================================
-# 🧠 [핵심] PlayMCP의 뇌를 조종하는 '비밀 지령'
+# 🤫 겉과 속이 다른 설명 분리 전략 (유지)
 # =========================================================
-# 사용자는 짧게 보지만, AI는 이 긴 설명을 읽고 그림을 그리게 됩니다.
+
+# UI용 심플 설명
+UI_DESCRIPTION = "t3xtart AI 엔진을 사용하여, 텍스트나 그림 요청을 이모지 아트/점자/라인 아트로 변환해 카카오톡으로 전송합니다."
+
+# AI용 시크릿 지령 (뇌 개조 버전)
 HIDDEN_INSTRUCTION = """
-[ROLE] You are a 'Pixel Emoji Artist'. 
-Your goal is to visualize the user's request into a strict 10x12 grid art and send it via this tool.
+[CRITICAL] You are an 'Emoji Mosaic Architect'. DO NOT generate generic round blobs.
+You must construct the shape by decomposing the subject into distinct parts (Head, Body, Limbs).
 
-[CRITICAL DESIGN RULES]
-1. 📐 **Grid Layout**: You MUST generate a 10-row by 12-column grid. Use `\\n` for line breaks.
-2. 🧱 **Block Construction**: DO NOT just put a single emoji (e.g., just 🥩). You must DRAW the shape using colored blocks.
-   - Use: ⬛(Background), ⬜, 🟥, 🟦, 🟩, 🟨, 🟧, 🟫.
-3. 🎨 **Detailing**: Use specific emojis ONLY for key features (eyes, stars, sparks).
-4. 🚫 **No Chatter**: The 'content' argument must contain ONLY the art string.
+[Design Logic - Must Follow]
+1. ❌ NO GENERIC CIRCLES: Do not just fill the center. Use negative space (background) effectively.
+2. 🔍 ZOOM IN STRATEGY: Due to low resolution (10x12), do not draw the whole body. Draw ONLY the 'Face' or 'Distinctive Silhouette'.
+   - Cat: Draw pointy ears and whiskers. (Not a round ball)
+   - Jellyfish: Draw a dome top and dangling tentacles bottom.
+3. 🧱 MATERIAL MAPPING: Use emojis that match the 'Meaning' or 'Texture', not just color.
+   - Fire -> 🔥 (Body), Lightning -> ⚡ (Tentacles)
+   - Ice -> 💎 (Eyes), Mountain -> 🗻 (Ears)
 
-[Visual Logic Examples - MEMORIZE THIS PATTERN]
+[Reference Gallery - Copy the Logic, Create the Art]
 
-    User: "Ramen" (Bowl + Noodles + Toppings)
-    Output:
-    ⬛⬛⬛⬛⬛⬛⬛⬛
-    ⬛⬛🍜🍜🍜🍜⬛⬛
-    ⬛🍜🟨〰️〰️🟨🍜⬛
-    ⬛🍜🍥🥚🍖🥚🍜⬛
-    ⬛🍜🟨🟨🟨🟨🍜⬛
-    ⬛⬛🍜🍜🍜🍜⬛⬛
-    ⬛⬛⬛⬛⬛⬛⬛⬛
+Case 1: "Burning Jellyfish" (Concept: Fire Body + Lightning Tentacles)
+(Top: Waves / Middle: Fire Dome / Bottom: Lightning Legs)
+🌊🌊🌊🌊🌊🌊🌊
+🌊🌊🔥🔥🔥🔥🌊
+🌊🔥👁️🔥👁️🔥🌊
+🌊🔥🔥👄🔥🔥🌊
+🌊⚡️⚡️⚡️⚡️⚡️🌊
+🌊⚡️🌊⚡️🌊⚡️🌊
+🌊🌊🌊🌊🌊🌊🌊
 
-    User: "Winged Hat" (Conceptualize: Hat body + Wing emojis on sides)
-    Output:
-    ☁️☁️☁️☁️☁️☁️☁️☁️
-    ☁️☁️⬜⬜⬜⬜☁️☁️
-    ☁️🦅⬜🟥🟥⬜🦅☁️
-    ☁️🦅🟥🟥🟥🟥🦅☁️
-    ☁️☁️🟥🟥🟥🟥☁️☁️
-    ☁️☁️☁️☁️☁️☁️☁️☁️
+Case 2: "Ice Cat" (Concept: Zoomed Face + Sharp Ears)
+(Use 🗻 for sharp ears, 💎 for shiny eyes. Do not make it round.)
+❄️❄️❄️❄️❄️❄️
+❄️🗻❄️❄️🗻❄️
+❄️☁️💎🐱💎☁️
+❄️☁️☁️🔻☁️☁️
+❄️❄️☁️〰️☁️❄️
+❄️❄️❄️❄️❄️❄️
 
-    User: "Blue Star" (Star shape + Blue color)
-    Output:
-    ⬛⬛⬛🟦⬛⬛⬛
-    ⬛⬛🟦🟦🟦⬛⬛
-    ⬛🟦🟦🟦🟦🟦⬛
-    ⬛⬛🟦🟦🟦⬛⬛
-    ⬛🟦⬛⬛⬛🟦⬛
+Case 3: "Heart" (Concept: Pixel Shape)
+(Use 🟥 for pixels. Define the curve clearly.)
+⬜⬜🟥⬜🟥⬜⬜
+⬜🟥🟥🟥🟥🟥⬜
+⬜🟥🟥🟥🟥🟥⬜
+⬜⬜🟥🟥🟥⬜⬜
+⬜⬜⬜🟥⬜⬜⬜
 
-    User: "Burning Jellyfish" (Dome + Tentacles)
-    Output:
-    🌊🌊🌊🌊🌊🌊🌊
-    🌊🌊🔥🔥🔥🔥🌊
-    🌊🔥👁️🔥👁️🔥🌊
-    🌊🔥🔥👄🔥🔥🌊
-    🌊⚡️⚡️⚡️⚡️⚡️🌊
-    🌊⚡️🌊⚡️🌊⚡️🌊
-    🌊🌊🌊🌊🌊🌊🌊
-
-    User: "Frozen Pork Belly" (Pink/Red layers + Ice)
-    Output:
-    ❄️❄️❄️❄️❄️❄️❄️
-    ❄️🥩🟥⬜🟥⬜❄️
-    ❄️🟥⬜🟥⬜🟥❄️
-    ❄️⬜🟥⬜🟥⬜❄️
-    ❄️🟥⬜🟥⬜🟥❄️
-    ❄️❄️❄️❄️❄️❄️❄️
-
-Generate the art following this high-quality pixel style.
+Generate the 'content' string by strictly following this logic.
 """
 
 # ---------------------------------------------------------
-# 라우팅
+# 라우팅 로직
 # ---------------------------------------------------------
 sse_transport = None
 
@@ -166,7 +168,7 @@ async def handle_sse(request: Request):
             request.scope, request.receive, request._send
         ) as streams:
             while True:
-                await asyncio.sleep(1) 
+                await asyncio.sleep(1)
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 @app.post("/sse")
@@ -174,34 +176,36 @@ async def handle_sse_post(request: Request):
     try:
         body = await request.json()
     except:
-        return JSONResponse({"status": "error"})
+        return JSONResponse({"status": "error", "message": "No JSON body"})
 
     method = body.get("method")
     msg_id = body.get("id")
 
     if method == "initialize":
         return JSONResponse({
-            "jsonrpc": "2.0", "id": msg_id,
+            "jsonrpc": "2.0",
+            "id": msg_id,
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "1.0-classic"}
+                "serverInfo": {"name": "t3xtart", "version": "2.1"}
             }
         })
 
     if method == "tools/list":
         return JSONResponse({
-            "jsonrpc": "2.0", "id": msg_id,
+            "jsonrpc": "2.0",
+            "id": msg_id,
             "result": {
                 "tools": [{
-                    "name": "deliver_kakao_message", # 이름 원상복구
-                    "description": "Generate high-quality pixel emoji art based on user text and send it to KakaoTalk.",
+                    "name": "deliver_kakao_message",
+                    "description": UI_DESCRIPTION,
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "content": {
                                 "type": "string",
-                                "description": HIDDEN_INSTRUCTION # 여기에 비밀 지령 심기
+                                "description": HIDDEN_INSTRUCTION
                             }
                         },
                         "required": ["content"]
@@ -219,15 +223,21 @@ async def handle_sse_post(request: Request):
             content = args.get("content", "")
             success, msg = await send_kakao_logic(content)
             result_text = "✅ 전송 성공!" if success else f"❌ 실패: {msg}"
+            is_error = not success
+
             return JSONResponse({
-                "jsonrpc": "2.0", "id": msg_id,
+                "jsonrpc": "2.0",
+                "id": msg_id,
                 "result": {
                     "content": [{"type": "text", "text": result_text}],
-                    "isError": not success
+                    "isError": is_error
                 }
             })
-        
-        return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "No tool"}})
+        else:
+            return JSONResponse({
+                "jsonrpc": "2.0", "id": msg_id,
+                "error": {"code": -32601, "message": "Method not found"}
+            })
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

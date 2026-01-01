@@ -36,7 +36,7 @@ def generate_art_with_gemini(user_prompt: str):
 
     # 프롬프트 (공통 사용)
     system_prompt = """
-    Role: You are a master of 'Emoji Pixel Art'. 
+    Role: You are a master of 'Emoji Pixel Art'.
     Task: Convert the user's request into a **STRICT 10x12 GRID** art.
 
     [CRITICAL RULES - MUST FOLLOW]
@@ -72,7 +72,7 @@ def generate_art_with_gemini(user_prompt: str):
     ⬛🟦🟦🟦🟦🟦⬛
     ⬛⬛🟦🟦🟦⬛⬛
     ⬛🟦⬛⬛⬛🟦⬛
-    
+
     User: "Burning Jellyfish"
     Output:
     🌊🌊🌊🌊🌊🌊🌊
@@ -81,6 +81,7 @@ def generate_art_with_gemini(user_prompt: str):
     🌊🔥🔥👄🔥🔥🌊
     🌊⚡️⚡️⚡️⚡️⚡️🌊
     🌊⚡️🌊⚡️🌊⚡️🌊
+    🌊🌊🌊🌊🌊🌊🌊
 
     User: "Frozen Pork Belly" (Pink/Red layers + Ice)
     Output:
@@ -90,12 +91,12 @@ def generate_art_with_gemini(user_prompt: str):
     ❄️⬜🟥⬜🟥⬜❄️
     ❄️🟥⬜🟥⬜🟥❄️
     ❄️❄️❄️❄️❄️❄️❄️
-    
+
     Now, generate art for:
     """
 
-    # 🎯 전략: 
-    # 1. 2.5-Flash 시도 
+    # 🎯 전략:
+    # 1. 2.5-Flash 시도
     # 2. (500 에러 시) 2초 쉬고 2.5-Flash 재시도
     # 3. (그래도 안 되면) 1.5-Flash (안정형)로 교체
 
@@ -106,12 +107,12 @@ def generate_art_with_gemini(user_prompt: str):
     ]
 
     for i, (model_name, max_tokens) in enumerate(models_to_try):
-        
+
         # 재시도(2번째 시도)일 경우, 잠깐 쉼 (Back-off strategy)
         if i == 1:
             logger.info("⏳ 500 에러 발생. 2초 대기 후 재시도합니다...")
             time.sleep(2.0)
-        
+
         # 백업 모델(3번째 시도)일 경우 로그
         if i == 2:
             logger.info("⚠️ 2.5 모델 불안정. 1.5 모델로 교체 투입!")
@@ -121,7 +122,7 @@ def generate_art_with_gemini(user_prompt: str):
         payload = {
             "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser Request: {user_prompt}"}]}],
             "generationConfig": {
-                "temperature": 0.4, 
+                "temperature": 0.4,
                 "maxOutputTokens": max_tokens
             }
         }
@@ -138,10 +139,10 @@ def generate_art_with_gemini(user_prompt: str):
                     # 성공하면 바로 반환 (반복문 종료)
                     display_name = model_name.replace("models/", "").upper()
                     return text.strip(), display_name
-            
+
             # 500(서버 에러) or 429(과부하) -> 다음 시도로 넘어감 (continue)
             logger.warning(f"⚠️ 실패 (Code: {response.status_code}) - {response.text[:100]}...")
-            continue 
+            continue
 
         except Exception as e:
             logger.error(f"❌ 통신 에러: {e}")
@@ -160,7 +161,7 @@ def refresh_kakao_token():
     rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
     client_secret = os.environ.get("KAKAO_CLIENT_SECRET")
-    
+
     if not rest_api_key or not refresh_token:
         return False
 
@@ -172,7 +173,7 @@ def refresh_kakao_token():
     }
     if client_secret:
         data["client_secret"] = client_secret
-    
+
     try:
         res = requests.post(url, data=data)
         if res.status_code == 200:
@@ -188,12 +189,12 @@ def refresh_kakao_token():
 # =========================================================
 async def send_kakao_logic(final_art: str, original_prompt: str, model_used: str):
     global CURRENT_ACCESS_TOKEN
-    
+
     if not CURRENT_ACCESS_TOKEN:
         refresh_kakao_token()
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    
+
     final_message = f"🎨 t3xtart 작품 도착!\n(주제: {original_prompt})\n\n{final_art}\n\n(Artist: {model_used})"
 
     def try_post(token):
@@ -240,7 +241,7 @@ async def handle_sse(request: Request):
             request.scope, request.receive, request._send
         ) as streams:
             while True:
-                await asyncio.sleep(1) 
+                await asyncio.sleep(1)
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 @app.post("/sse")
@@ -291,15 +292,15 @@ async def handle_sse_post(request: Request):
 
         if tool_name == "generate_and_send_art":
             user_prompt = args.get("prompt", "")
-            
+
             # 1. 오뚝이 시스템 가동
             art_content, model_used = generate_art_with_gemini(user_prompt)
-            
+
             # 2. 카톡 전송
             success, msg = await send_kakao_logic(art_content, user_prompt, model_used)
-            
+
             result_text = "✅ 작품 생성 및 전송 완료!" if success else f"❌ 실패: {msg}"
-            
+
             return JSONResponse({
                 "jsonrpc": "2.0", "id": msg_id,
                 "result": {
@@ -307,7 +308,7 @@ async def handle_sse_post(request: Request):
                     "isError": not success
                 }
             })
-        
+
         return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "No tool"}})
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})

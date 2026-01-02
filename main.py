@@ -33,8 +33,8 @@ def refresh_kakao_token():
     global CURRENT_ACCESS_TOKEN
     rest_api_key = os.environ.get("KAKAO_CLIENT_ID")
     refresh_token = os.environ.get("KAKAO_REFRESH_TOKEN")
-    client_secret = os.environ.get("KAKAO_CLIENT_SECRET") 
-    
+    client_secret = os.environ.get("KAKAO_CLIENT_SECRET")
+
     if not rest_api_key or not refresh_token:
         return False
 
@@ -44,10 +44,10 @@ def refresh_kakao_token():
         "client_id": rest_api_key,
         "refresh_token": refresh_token
     }
-    
+
     if client_secret:
         data["client_secret"] = client_secret
-    
+
     try:
         res = requests.post(url, data=data)
         if res.status_code == 200:
@@ -60,12 +60,12 @@ def refresh_kakao_token():
 
 async def send_kakao_logic(content: str):
     global CURRENT_ACCESS_TOKEN
-    
+
     if not CURRENT_ACCESS_TOKEN:
         refresh_kakao_token()
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    
+
     def try_post(token):
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
@@ -194,7 +194,7 @@ async def handle_sse(request: Request):
             request.scope, request.receive, request._send
         ) as streams:
             while True:
-                await asyncio.sleep(1) 
+                await asyncio.sleep(1)
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 @app.post("/sse")
@@ -251,10 +251,10 @@ async def handle_sse_post(request: Request):
             # AI의 기획 의도를 로그로 확인 (디버깅용)
             plan = args.get("artistic_planning", "")
             logger.info(f"🎨 Art Director's Plan:\n{plan}")
-            
+
             content = args.get("final_art_grid", "")
             success, msg = await send_kakao_logic(content)
-            
+
             result_text = "✅ 전송 성공!" if success else f"❌ 실패: {msg}"
             return JSONResponse({
                 "jsonrpc": "2.0", "id": msg_id,
@@ -263,7 +263,7 @@ async def handle_sse_post(request: Request):
                     "isError": not success
                 }
             })
-        
+
         return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "No tool"}})
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
@@ -271,6 +271,10 @@ async def handle_sse_post(request: Request):
 @app.post("/messages")
 async def handle_messages(request: Request):
     return {"status": "ok"}
+
+@app.get("/")
+async def health_check():
+    return "I am alive!"
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

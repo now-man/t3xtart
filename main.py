@@ -151,8 +151,7 @@ async def sse_post(request: Request):
 
     if method == "tools/list":
         return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": msg_id,
+            "jsonrpc": "2.0", "id": msg_id,
             "result": {
                 "tools": [{
                     "name": "render_and_send",
@@ -160,27 +159,42 @@ async def sse_post(request: Request):
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "user_request": {"type": "string"}
+                            "user_request": {
+                                "type": "string",
+                                "description": "Original user prompt"
+                            },
+                            "final_art_grid": {
+                                "type": "string",
+                                "description": "The final rendered emoji/ascii art grid"
+                            }
                         },
-                        "required": ["user_request"]
+                        "required": ["user_request", "final_art_grid"]
                     }
                 }]
             }
         })
 
     if method == "tools/call":
-        args = body["params"]["arguments"]
-        user_request = args["user_request"]
-
-        # MCP에서는 LLM이 이 세 단계를 내부적으로 수행
-        # 우리는 결과만 받아서 전송
-        art = args.get("final_art_grid", "")
+        params = body.get("params", {})
+        args = params.get("arguments", {})
+    
+        user_request = args.get("user_request", "")
+        art = args.get("final_art_grid", "").strip()
+    
+        if not art:
+            art = "❌ 아트를 생성하지 못했어요."
+    
+        logger.info(f"📝 Request: {user_request}")
+        logger.info(f"🎨 Final Art:\n{art}")
+    
         await send_kakao(art)
-
+    
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": msg_id,
-            "result": {"content": [{"type": "text", "text": "✅ 전송 완료"}]}
+            "result": {
+                "content": [{"type": "text", "text": "✅ 전송 완료"}]
+            }
         })
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})

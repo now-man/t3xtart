@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 from mcp.server.sse import SseServerTransport
+import re
 
 # =========================================================
 # 기본 설정
@@ -282,6 +283,54 @@ def fallback_art(user_request: str) -> str:
         f"({user_request})"
     )
 
+EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAD6\U0001F000-\U0001FFFF]"
+)
+
+SPECIAL_RE = re.compile(r"[┏┓┗┛┃━╯╰╮╭_=|]+")
+REPEAT_RE = re.compile(r"(.)\1{2,}")
+
+def looks_like_unprocessed_text(s: str) -> bool:
+    s = s.strip()
+    lines = s.splitlines()
+
+    # 1. 한 줄 + 반복/장식 없음
+    if len(lines) == 1:
+        if (
+            not EMOJI_RE.search(s)
+            and not SPECIAL_RE.search(s)
+            and not REPEAT_RE.search(s)
+        ):
+            return True
+
+    # 2. 여러 줄인데 그냥 문장 나열
+    if len(lines) > 1:
+        decorated = any(
+            EMOJI_RE.search(l) or SPECIAL_RE.search(l) or REPEAT_RE.search(l)
+            for l in lines
+        )
+        if not decorated:
+            return True
+
+    return False
+
+
+def validate_art(user_request: str, art: str) -> bool:
+    if not art.strip():
+        return False
+
+    # 그냥 텍스트 복붙 방지
+    if looks_like_unprocessed_text(art):
+        return False
+
+    # "그려줘"인데 줄 1개 + 장식 없음
+    if "그려줘" in user_request and len(art.splitlines()) == 1:
+        if not EMOJI_RE.search(art) and not SPECIAL_RE.search(art):
+            return False
+
+    return True
+
+
 # =========================================================
 # MCP (SSE)
 # =========================================================
@@ -349,16 +398,16 @@ async def sse_post(request: Request):
         args = body["params"]["arguments"]
         user_request = args["user_request"]
         art = args["final_art_grid"].strip()
-
+    
         logger.info(f"📝 Request: {user_request}")
         logger.info(f"🎨 Raw Art:\n{art}")
-
-        if not art or is_unstable_art(art):
-            logger.warning("⚠️ Unstable art detected → fallback applied")
+    
+        if not validate_art(user_request, art) or is_unstable_art(art):
+            logger.warning("⚠️ Invalid or unstable art → fallback")
             art = fallback_art(user_request)
-
+    
         await send_kakao(art)
-
+    
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -366,6 +415,7 @@ async def sse_post(request: Request):
                 "content": [{"type": "text", "text": "✅ 전송 완료"}]
             }
         })
+      
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

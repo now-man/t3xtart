@@ -26,6 +26,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+FULL_SPACE = "ㅤ"  # 전각 공백 (모바일 안전)
+
 # =========================================================
 # 🔐 Kakao Token
 # =========================================================
@@ -33,20 +35,22 @@ CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
 def refresh_kakao_token():
     global CURRENT_ACCESS_TOKEN
-    url = "https://kauth.kakao.com/oauth/token"
-    data = {
-        "grant_type": "refresh_token",
-        "client_id": os.environ.get("KAKAO_CLIENT_ID"),
-        "refresh_token": os.environ.get("KAKAO_REFRESH_TOKEN"),
-        "client_secret": os.environ.get("KAKAO_CLIENT_SECRET"),
-    }
     try:
-        res = requests.post(url, data=data, timeout=5)
+        res = requests.post(
+            "https://kauth.kakao.com/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": os.environ.get("KAKAO_CLIENT_ID"),
+                "refresh_token": os.environ.get("KAKAO_REFRESH_TOKEN"),
+                "client_secret": os.environ.get("KAKAO_CLIENT_SECRET"),
+            },
+            timeout=5,
+        )
         if res.status_code == 200:
             CURRENT_ACCESS_TOKEN = res.json().get("access_token")
             return True
     except Exception as e:
-        logger.error(f"Kakao token refresh failed: {e}")
+        logger.error(e)
     return False
 
 async def send_kakao(content: str):
@@ -54,27 +58,64 @@ async def send_kakao(content: str):
     if not CURRENT_ACCESS_TOKEN:
         refresh_kakao_token()
 
-    url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
+    def post(token):
+        return requests.post(
+            "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+            headers={"Authorization": f"Bearer {token}"},
+            data={
+                "template_object": json.dumps({
+                    "object_type": "text",
+                    "text": f"🎨 t3xtart 도착!\n\n{content}",
+                    "link": {"web_url": "https://playmcp.kakao.com"},
+                })
+            },
+        )
 
-    def try_post(token):
-        headers = {"Authorization": f"Bearer {token}"}
-        payload = {
-            "template_object": json.dumps({
-                "object_type": "text",
-                "text": f"🎨 t3xtart 도착!\n\n{content}",
-                "link": {"web_url": "https://playmcp.kakao.com"},
-            })
-        }
-        return requests.post(url, headers=headers, data=payload)
-
-    res = try_post(CURRENT_ACCESS_TOKEN)
-    if res.status_code == 401:
-        if refresh_kakao_token():
-            res = try_post(CURRENT_ACCESS_TOKEN)
-        else:
-            return False
+    res = post(CURRENT_ACCESS_TOKEN)
+    if res.status_code == 401 and refresh_kakao_token():
+        res = post(CURRENT_ACCESS_TOKEN)
 
     return res.status_code == 200
+
+# =========================================================
+# 🧹 ART CLEANING & NORMALIZATION
+# =========================================================
+def clean_art(raw: str) -> str:
+    if not raw:
+        return ""
+
+    # ``` 제거
+    raw = re.sub(r"^```.*?\n|```$", "", raw, flags=re.S)
+
+    # [🟨] 같은 패턴 제거
+    raw = re.sub(r"\[([^\]]+)\]", r"\1", raw)
+
+    lines = [l.rstrip() for l in raw.splitlines() if l.strip()]
+
+    if not lines:
+        return raw.strip()
+
+    max_len = max(len(l) for l in lines)
+
+    # 전각 공백으로 가로 길이 통일
+    fixed = []
+    for l in lines:
+        pad = max_len - len(l)
+        fixed.append(l + FULL_SPACE * pad)
+
+    return "\n".join(fixed)
+
+# =========================================================
+# 한글 ASCII 안전 처리
+# =========================================================
+def korean_ascii_box(text: str) -> str:
+    return (
+        f"║ㅤ  {text}  ㅤㅤ║\n"
+        "(人 > <,,) 한글 아스키아트는 아직 지원이 안 돼요.. 미안해요!"
+    )
+
+def looks_like_korean_ascii_request(user_request: str) -> bool:
+    return bool(re.search(r"[가-힣]", user_request)) and "아스키" in user_request
 
 # =========================================================
 # 🧠 MASTER ART PROMPT (사용자님의 정성스러운 프롬프트를 여기에!)
@@ -184,7 +225,7 @@ async def sse(request: Request):
     async def stream():
         async with sse_transport.connect_sse(
             request.scope, request.receive, request._send
-        ) as streams:
+        ):
             while True:
                 await asyncio.sleep(1)
 
@@ -192,11 +233,7 @@ async def sse(request: Request):
 
 @app.post("/sse")
 async def sse_post(request: Request):
-    try:
-        body = await request.json()
-    except:
-        return JSONResponse({"status": "error"})
-
+    body = await request.json()
     method = body.get("method")
     msg_id = body.get("id")
 
@@ -207,7 +244,7 @@ async def sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "9.0-brain-cot"}
+                "serverInfo": {"name": "t3xtart", "version": "FINAL"}
             }
         })
 
@@ -218,26 +255,14 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate High-Quality Emoji/ASCII Art based on user request. MUST plan first.",
+                    "description": "Generate emoji / ASCII art and send to Kakao",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "user_request": {
-                                "type": "string",
-                                "description": "Original user prompt"
-                            },
-                            # 1. 뇌를 깨우는 질문 (여기에 답변하면서 AI가 생각을 정리함)
-                            "design_plan": {
-                                "type": "string",
-                                "description": PLANNING_PROMPT
-                            },
-                            # 2. 실제 결과물 (여기에는 마스터 프롬프트를 넣어줌)
-                            "final_art_grid": {
-                                "type": "string",
-                                "description": MASTER_INSTRUCTION + "\n\nGenerate ONLY the final art string here."
-                            }
+                            "user_request": {"type": "string"},
+                            "final_art_grid": {"type": "string"},
                         },
-                        "required": ["user_request", "design_plan", "final_art_grid"]
+                        "required": ["user_request", "final_art_grid"]
                     }
                 }]
             }
@@ -246,33 +271,22 @@ async def sse_post(request: Request):
     if method == "tools/call":
         args = body["params"]["arguments"]
         user_request = args.get("user_request", "")
+        art_raw = args.get("final_art_grid", "")
 
-        # AI의 설계도는 로그에만 남기고 사용자가 볼 필요는 없음 (혹은 디버깅용)
-        plan = args.get("design_plan", "")
-        art = args.get("final_art_grid", "").strip()
+        if looks_like_korean_ascii_request(user_request):
+            art = korean_ascii_box(user_request.replace("그려줘", "").strip())
+        else:
+            art = clean_art(art_raw)
 
-        logger.info(f"📝 Request: {user_request}")
-        logger.info(f"🧠 AI Plan: {plan}")
-        logger.info(f"🎨 Final Art:\n{art}")
-
-        if not validate_art(user_request, art):
-            art = "(생성 실패: 너무 단순하거나 규칙에 맞지 않습니다.)"
-
-        # 카카오 전송
-        success = await send_kakao(art)
-
-        result_msg = "✅ 전송 완료" if success else "❌ 전송 실패 (토큰 확인 필요)"
+        await send_kakao(art)
 
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": msg_id,
-            "result": {
-                "content": [{"type": "text", "text": result_msg}]
-            }
+            "result": {"content": [{"type": "text", "text": "✅ 전송 완료"}]}
         })
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
-
 @app.get("/")
 async def health():
     return "t3xtart alive"

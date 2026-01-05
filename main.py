@@ -78,7 +78,7 @@ async def send_kakao(content: str):
     return res.status_code == 200
 
 # =========================================================
-# 🧹 데이터 정제 및 후처리 (Improved Logic)
+# 🧹 데이터 정제 (가위질 로직 추가)
 # =========================================================
 
 def clean_text(text: str) -> str:
@@ -89,42 +89,20 @@ def clean_text(text: str) -> str:
     text = text.strip().strip('"').strip("'")
     return text
 
-def normalize_emoji_grid(art: str) -> str:
+def truncate_art(text: str, max_lines: int = 15) -> str:
     """
-    [핵심 수정] 가로 길이가 부족하면 '가운데 정렬'로 ⬛를 채워넣음.
-    오른쪽에만 붙으면 그림이 쏠리기 때문.
+    [핵심 수정] AI가 폭주해서 너무 길게 그리면 강제로 자름.
+    카톡 화면을 고려해 15~20줄이 적당함.
     """
-    lines = art.splitlines()
-    if len(lines) <= 1:
-        return art
-    
-    # 이모지 아트 여부 확인 (이모지 비율 30% 이상)
-    emoji_count = len(re.findall(r'[^\x00-\x7F]', art))
-    if emoji_count < len(art) * 0.3: 
-        return art 
-
-    # 가장 긴 줄의 길이 찾기
-    max_len = max(len(line) for line in lines)
-    
-    padded_lines = []
-    for line in lines:
-        diff = max_len - len(line)
-        if diff > 0:
-            # [수정] 양쪽으로 나눠서 채우기 (Centering)
-            left_pad = diff // 2
-            right_pad = diff - left_pad
-            
-            # ⬛(검정) 블록으로 양옆을 채워 균형을 맞춤
-            # (만약 배경이 흰색인 경우엔 티가 나겠지만, 
-            #  오른쪽에 몰아서 붙이는 것보단 훨씬 자연스러운 액자 효과를 줌)
-            line = ("⬛" * left_pad) + line + ("⬛" * right_pad)
-            
-        padded_lines.append(line)
-        
-    return "\n".join(padded_lines)
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        logger.warning(f"⚠️ Art too long ({len(lines)} lines). Truncating.")
+        # 잘린 부분 알림
+        return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
+    return text
 
 # =========================================================
-# 🧠 MASTER ART PROMPT (배경 채움 강제)
+# 🧠 MASTER ART PROMPT (길이 제한 규칙 추가)
 # =========================================================
 MASTER_INSTRUCTION = """
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
@@ -133,13 +111,13 @@ MASTER_INSTRUCTION = """
 Choose ONE style from the 4 categories below based on the user's request and generate the art string.
 
 ---
-### 1. 한 줄 이모지 아트 (Simple Line)
+### 1. 한 줄 이모지 아트 (Simple Line) ; 한 줄 이모지 아트 ; 간단한 도트 아트
 - Strategy: Combine emojis to represent a concept in one line.
 - Ex: "2026" -> 2️⃣0️⃣2️⃣6️⃣
 - Ex: "Grass Monkey" -> 🌿🐒
 - Ex: "Love Meat" -> 🧑❤️🍖
 
-### 2. 여러 줄 이모지 아트 (Pixel Grid Art)
+### 2. 여러 줄 이모지 아트 (Pixel Grid Art) ; 도트 아트 ; 픽셀 아트
 - Strategy: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) to draw the shape.
 - CRITICAL RULE: Differentiate Subject vs Background. Use Negative Space.
 - Ex: "Burning Jellyfish":
@@ -175,13 +153,13 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 ⬛⬛🟦🟦🟩🟩🟦⬛⬛
 ⬛⬛⬛🟦🟦🟦⬛⬛⬛
 
-### 3. 카오모지 (Kaomoji)
+### 3. 카오모지 (Kaomoji) ; 특수문자 ; 간단한 이모티콘
 - Strategy: One-line special characters.
 - Ex: "Fighting" -> (ง •̀_•́)ง
 - Ex: "Running" -> (งᐖ)ว
 - Ex: "Sad" -> (｡•́︿•̀｡)
 
-### 4. 아스키 아트 (ASCII / Braille)
+### 4. 아스키 아트 (ASCII / Braille) ; 특수기호나 점자를 이용한 아트
 - Strategy: Use lines, dots, blocks for complex shapes.
 - Ex: "Cat Heart":
 ˚∧＿∧   　+        —̳͟͞͞💗
@@ -260,7 +238,7 @@ async def sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "12.0-perfect-rect"}
+                "serverInfo": {"name": "t3xtart", "version": "14.0-safety-cut"}
             }
         })
 
@@ -297,18 +275,19 @@ async def sse_post(request: Request):
         plan = args.get("design_plan", "")
         raw_art = args.get("final_art_grid", "")
         
+        # 1. 정제 (Markdown 제거)
         clean_art = clean_text(raw_art)
         
-        # [핵심] 가운데 정렬 보정 실행
-        final_art = normalize_emoji_grid(clean_art)
+        # [NEW] 2. 안전장치: 길이 제한 (15줄 넘어가면 자름)
+        safe_art = truncate_art(clean_art, max_lines=15)
 
         logger.info(f"📝 Request: {user_request}")
-        logger.info(f"🎨 Final Art:\n{final_art}")
+        logger.info(f"🎨 Art (Safe):\n{safe_art}")
 
-        if not final_art.strip():
-            final_art = "(🎨 생성된 아트가 비어있습니다. 다시 시도해주세요.)"
+        if not safe_art.strip():
+            safe_art = "(🎨 생성된 아구가 비어있습니다. 다시 시도해주세요.)"
 
-        success = await send_kakao(final_art)
+        success = await send_kakao(safe_art)
         result_msg = "✅ 전송 완료" if success else "❌ 전송 실패"
 
         return JSONResponse({

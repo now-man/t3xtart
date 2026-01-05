@@ -94,7 +94,7 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 - Ex: "Love Meat" -> 🧑❤️🍖
 
 ### 2. 여러 줄 이모지 아트 (Pixel Grid Art)
-- **Strategy**: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪⬛️⬜️) to draw the shape.
+- **Strategy**: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) to draw the shape.
 - **CRITICAL RULE**: Differentiate Subject vs Background. Use Negative Space.
 - **Ex: "Burning Jellyfish"**:
 🌊🌊🌊🌊🌊🌊🌊

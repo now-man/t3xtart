@@ -253,24 +253,24 @@ def analyze_grid(grid: str):
         "cells": cells
     }
 
-def is_unstable_art(grid: str) -> bool:
-    info = analyze_grid(grid)
-    if not info.get("valid"):
+def is_unstable_art(art: str) -> bool:
+    lines = art.strip().splitlines()
+
+    # 줄 수 너무 적음
+    if len(lines) < 2:
         return True
 
-    if info["unique_count"] <= 1:
+    # 줄 길이 심하게 불균형
+    widths = [len(line) for line in lines]
+    if max(widths) - min(widths) > 2:
         return True
 
-    background = {"⬛", "⬜"}
-    if info["unique"].issubset(background):
-        return True
-
-    total = info["rows"] * info["cols"]
-    subject = sum(1 for c in info["cells"] if c not in background)
-    if subject / total < 0.15:
+    # 이모지 or 특수문자 하나도 없으면 불안정
+    if not any(ord(c) > 10000 or c in "⬛⬜🟩🟨🟦🟫┏┓┗┛┃━" for c in art):
         return True
 
     return False
+
 
 def fallback_art(user_request: str) -> str:
     return (
@@ -402,9 +402,9 @@ async def sse_post(request: Request):
         logger.info(f"📝 Request: {user_request}")
         logger.info(f"🎨 Raw Art:\n{art}")
     
-        if not validate_art(user_request, art) or is_unstable_art(art):
-            logger.warning("⚠️ Invalid or unstable art → fallback")
+        if not validate_art(user_request, art):
             art = fallback_art(user_request)
+
     
         await send_kakao(art)
     

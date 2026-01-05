@@ -2,14 +2,14 @@ import os
 import json
 import logging
 import requests
+import uvicorn
 import asyncio
-import re
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 from mcp.server.sse import SseServerTransport
+import re
 
 # =========================================================
 # 기본 설정
@@ -25,8 +25,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-FULLWIDTH_SPACE = "ㅤ"  # ★ 전각 공백 핵심
 
 # =========================================================
 # 🔐 Kakao Token
@@ -74,7 +72,7 @@ async def send_kakao(content: str):
     return res.status_code == 200
 
 # =========================================================
-# 🧠 SYSTEM PROMPT
+# 🧠 SYSTEM ART PROMPT (⚠️ 사용자 제공 내용 100% 포함)
 # =========================================================
 SYSTEM_ART_PROMPT = """
 너는 사용자의 텍스트 아티스트야.
@@ -228,51 +226,52 @@ ____  ∧ ∧___
 1. 사용자의 요구를 최대한 반영해야 함
 2. 한 가지의 스타일을 선택해야 함(한 줄 이모지 아트, 여러 줄 이모지 아트, 한 줄 특수문자 이모티콘(카오모지), 한 줄 특수문자 이모티콘(카오모지))
 3. 마지막의 string content를 생성해야 함
+
 """
 
 # =========================================================
-# 🧪 아트 검증 로직
+# 🧪 아트 안정성 검열 (도메인 무관)
 # =========================================================
-EMOJI_RE = re.compile("[\U0001F300-\U0001FAD6\U0001F000-\U0001FFFF]")
-SPECIAL_RE = re.compile(r"[┏┓┗┛┃━╯╰╮╭═░█▓]+")
-REPEAT_RE = re.compile(r"(.)\1{2,}")
-HANGUL_RE = re.compile("[가-힣]")
+def analyze_grid(grid: str):
+    rows = [r for r in grid.split("\n") if r]
+    if not rows:
+        return {"valid": False}
 
-def looks_like_unprocessed_text(s: str) -> bool:
-    lines = s.strip().splitlines()
-    if len(lines) == 1:
-        if not (EMOJI_RE.search(s) or SPECIAL_RE.search(s) or REPEAT_RE.search(s)):
-            return True
+    width = len(rows[0])
+    if any(len(r) != width for r in rows):
+        return {"valid": False}
+
+    cells = list("".join(rows))
+    unique = set(cells)
+
+    return {
+        "valid": True,
+        "rows": len(rows),
+        "cols": width,
+        "unique": unique,
+        "unique_count": len(unique),
+        "cells": cells
+    }
+
+def is_unstable_art(art: str) -> bool:
+    lines = art.strip().splitlines()
+
+    # 줄 수 너무 적음
+    if len(lines) < 2:
+        return True
+
+    # 줄 길이 심하게 불균형
+    widths = [len(line) for line in lines]
+    if max(widths) - min(widths) > 2:
+        return True
+
+    # 이모지 or 특수문자 하나도 없으면 불안정
+    if not any(ord(c) > 10000 or c in "⬛⬜🟩🟨🟦🟫┏┓┗┛┃━" for c in art):
+        return True
+
     return False
 
-def validate_art(user_request: str, art: str) -> bool:
-    if not art.strip():
-        return False
-    if looks_like_unprocessed_text(art):
-        return False
-    return True
 
-# =========================================================
-# 🎯 한글 대형 글씨 대응
-# =========================================================
-def korean_big_text_fallback(text: str) -> str:
-    padded = f"{FULLWIDTH_SPACE*2}{text}{FULLWIDTH_SPACE*2}"
-    width = len(padded)
-    top = "╔" + "═" * width + "╗"
-    mid = f"║{padded}║"
-    bot = "╚" + "═" * width + "╝"
-
-    notice = "\n".join([
-        "",
-        "(人 > <,,)",
-        "한글 아스키아트는 아직 지원이 안 돼요.. 미안해요!"
-    ])
-
-    return "\n".join([top, mid, bot]) + notice
-
-# =========================================================
-# 🧯 Fallback (최소 사용)
-# =========================================================
 def fallback_art(user_request: str) -> str:
     return (
         "⬛⬛⬛⬛⬛⬛⬛\n"
@@ -284,8 +283,56 @@ def fallback_art(user_request: str) -> str:
         f"({user_request})"
     )
 
+EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAD6\U0001F000-\U0001FFFF]"
+)
+
+SPECIAL_RE = re.compile(r"[┏┓┗┛┃━╯╰╮╭_=|]+")
+REPEAT_RE = re.compile(r"(.)\1{2,}")
+
+def looks_like_unprocessed_text(s: str) -> bool:
+    s = s.strip()
+    lines = s.splitlines()
+
+    # 1. 한 줄 + 반복/장식 없음
+    if len(lines) == 1:
+        if (
+            not EMOJI_RE.search(s)
+            and not SPECIAL_RE.search(s)
+            and not REPEAT_RE.search(s)
+        ):
+            return True
+
+    # 2. 여러 줄인데 그냥 문장 나열
+    if len(lines) > 1:
+        decorated = any(
+            EMOJI_RE.search(l) or SPECIAL_RE.search(l) or REPEAT_RE.search(l)
+            for l in lines
+        )
+        if not decorated:
+            return True
+
+    return False
+
+
+def validate_art(user_request: str, art: str) -> bool:
+    if not art.strip():
+        return False
+
+    # 그냥 텍스트 복붙 방지
+    if looks_like_unprocessed_text(art):
+        return False
+
+    # "그려줘"인데 줄 1개 + 장식 없음
+    if "그려줘" in user_request and len(art.splitlines()) == 1:
+        if not EMOJI_RE.search(art) and not SPECIAL_RE.search(art):
+            return False
+
+    return True
+
+
 # =========================================================
-# MCP SSE
+# MCP (SSE)
 # =========================================================
 sse_transport = None
 
@@ -322,7 +369,7 @@ async def sse_post(request: Request):
                 },
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "9.0-final"
+                    "version": "8.0-text-artist"
                 }
             }
         })
@@ -334,7 +381,7 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate text/emoji/ascii art and send to Kakao",
+                    "description": "Generate text/emoji/ascii art following the system art rules and send to Kakao",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -355,12 +402,9 @@ async def sse_post(request: Request):
         logger.info(f"📝 Request: {user_request}")
         logger.info(f"🎨 Raw Art:\n{art}")
 
-        # 한글 대형 글씨 요청 처리
-        if HANGUL_RE.search(user_request) and any(k in user_request for k in ["크게", "굵게", "대형"]):
-            art = korean_big_text_fallback(user_request.replace("그려줘", "").strip())
-
-        elif not validate_art(user_request, art):
+        if not validate_art(user_request, art):
             art = fallback_art(user_request)
+
 
         await send_kakao(art)
 
@@ -371,6 +415,7 @@ async def sse_post(request: Request):
                 "content": [{"type": "text", "text": "✅ 전송 완료"}]
             }
         })
+
 
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

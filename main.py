@@ -55,7 +55,7 @@ async def send_kakao(content: str):
         refresh_kakao_token()
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    
+
     def post_request(token):
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
@@ -68,7 +68,7 @@ async def send_kakao(content: str):
         return requests.post(url, headers=headers, data=payload)
 
     res = post_request(CURRENT_ACCESS_TOKEN)
-    
+
     if res.status_code == 401:
         if refresh_kakao_token():
             res = post_request(CURRENT_ACCESS_TOKEN)
@@ -274,10 +274,10 @@ async def sse_post(request: Request):
         user_request = args.get("user_request", "")
         plan = args.get("design_plan", "")
         raw_art = args.get("final_art_grid", "")
-        
+
         # 1. 정제 (Markdown 제거)
         clean_art = clean_text(raw_art)
-        
+
         # [NEW] 2. 안전장치: 길이 제한 (15줄 넘어가면 자름)
         safe_art = truncate_art(clean_art, max_lines=15)
 

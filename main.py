@@ -1,3 +1,4 @@
+
 import os
 import json
 import logging
@@ -78,8 +79,36 @@ async def send_kakao(content: str):
     return res.status_code == 200
 
 # =========================================================
-# 🧹 데이터 정제 및 유틸리티
+# 🧹 데이터 정제 및 파싱 (Parser)
 # =========================================================
+def parse_full_response(text: str):
+    """
+    [PLAN]과 [ART]를 분리합니다.
+    혹시 AI가 [ART] 태그를 빼먹었을 경우를 대비한 로직 포함.
+    """
+    plan = ""
+    art = ""
+    
+    # 1. 태그가 명확한 경우
+    if "[ART]" in text:
+        parts = text.split("[ART]")
+        plan = parts[0].replace("[PLAN]", "").strip()
+        art = parts[1].strip()
+    
+    # 2. 태그 없이 그림만 있는 경우 (혹은 PLAN만 있는 경우)
+    else:
+        # PLAN 태그가 있으면 그 뒤를 다 가져옴 (불완전하지만 시도)
+        if "[PLAN]" in text:
+             # 보통 PLAN이 먼저 나오므로, 뒷부분에 그림이 섞여 있을 수 있음.
+             # 하지만 안전하게 그냥 전체를 다 씀 (안내 메시지 용)
+             plan = text
+             art = "" 
+        else:
+            # 태그가 아예 없으면 전체를 아트라고 가정
+            art = text.strip()
+            
+    return plan, art
+
 def clean_text(text: str) -> str:
     if not text: return ""
     text = re.sub(r"^```[a-zA-Z]*\n", "", text, flags=re.MULTILINE)
@@ -105,7 +134,7 @@ def append_disclaimer(user_request: str, plan: str, art: str) -> str:
         return art + "\n\n(人 > <,,) 텍스트 아스키아트는 아직 불완전할 수 있어요."
 
 # =========================================================
-# 🧠 MASTER PROMPT (List Format 강제)
+# 🧠 통합 프롬프트 (단일 입력창 전략)
 # =========================================================
 MASTER_INSTRUCTION = """
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
@@ -193,14 +222,24 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 3. 📏 ALIGNMENT: For ASCII/Box art, use '　' (Full-width space) for alignment.
 
 Choose the best style and generate ONLY the final art string.
-"""
 
-PLANNING_PROMPT = """
-[STEP 1: PLAN]
-Before generating the final art string, explain your plan:
+[YOUR GOAL]
+You MUST generate the Design Plan AND the Final Art in a SINGLE output string.
+Do not separate them into different arguments.
+
+[OUTPUT FORMAT - STRICTLY FOLLOW THIS]
+Return one string formatted exactly like this:
+
+[PLAN]
 1. Selected Style: (1, 2, 3, or 4)
-2. Palette/Char: Which blocks/emojis will you use? & What is the Background emoji? (e.g., "Use 🟩 for Snake, 🌿 for BG")
-3. Geometry: How will you draw the shape? (e.g., "Draw a circle in the center")
+2. Palette/Char: (e.g., "Use 🟩 for Snake, 🌿 for BG")
+3. Geometry: (e.g., "Draw a centered circle")
+4. Wit/Concept: (Explain the creative twist)
+
+[ART]
+(Draw the final art string here immediately)
+
+Choose the best style and generate ONLY the final art string.
 """
 
 # =========================================================
@@ -239,7 +278,7 @@ async def sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "18.0-list-structure"}
+                "serverInfo": {"name": "t3xtart", "version": "19.0-one-container"}
             }
         })
 
@@ -250,23 +289,19 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate Witty Text Art. Must Plan first.",
+                    "description": "Generate Text Art. Put EVERYTHING (Plan + Art) into 'response_container'.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "user_request": {"type": "string"},
-                            "design_plan": {
+                            # [핵심] 오직 이 파라미터 하나만 받습니다.
+                            # AI가 도망갈 구멍을 없애버립니다.
+                            "response_container": {
                                 "type": "string",
-                                "description": PLANNING_PROMPT
-                            },
-                            # [핵심] 문자열(String) 대신 배열(Array) 사용!
-                            "art_lines": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "The art grid, row by row. Example: ['⬜️⬜️', '🟥🟥']"
+                                "description": MASTER_INSTRUCTION
                             }
                         },
-                        "required": ["user_request", "design_plan", "art_lines"]
+                        "required": ["user_request", "response_container"]
                     }
                 }]
             }
@@ -275,32 +310,31 @@ async def sse_post(request: Request):
     if method == "tools/call":
         args = body["params"]["arguments"]
         user_request = args.get("user_request", "")
-        plan = args.get("design_plan", "")
         
-        # 1. 리스트 받기
-        art_lines = args.get("art_lines", [])
+        # 1. 단일 컨테이너에서 꺼내기
+        full_text = args.get("response_container", "")
         
-        # 2. 리스트를 문자열로 합치기
-        # (혹시 LLM이 실수로 문자열을 보냈다면 그대로 씀)
-        if isinstance(art_lines, str):
-            raw_art = art_lines
-        else:
-            raw_art = "\n".join(art_lines)
-
+        # 2. 파이썬 분해 작업
+        plan, raw_art = parse_full_response(full_text)
+        
         # 3. 정제
         clean_art = clean_text(raw_art)
         
-        # 4. 빈 값 방어 (Plan이라도 보내기)
+        # 4. 빈 값 방어
         if not clean_art.strip():
-            logger.warning("⚠️ Empty Art generated. Sending fallback message.")
-            clean_art = f"(🎨 열심히 고민했는데 그림을 완성하지 못했어요.. 다시 한번 부탁드려요!)\n\n[AI의 변명]\n{plan}"
+            # 만약 [ART] 태그를 못 찾았거나 내용이 없으면
+            # 혹시 full_text 전체가 그림일 수도 있으니 그걸 써본다.
+            if len(full_text) > 20 and ("⬜" in full_text or "⬛" in full_text):
+                 clean_art = clean_text(full_text)
+            else:
+                clean_art = f"(🎨 그림 데이터가 누락되었습니다. 다시 시도해주세요.)\n\n[Plan]\n{plan}"
 
-        # 5. 안전장치
+        # 5. 안전장치 (길이 제한 & 안내 멘트)
         safe_art = truncate_art(clean_art, max_lines=15)
         final_art = append_disclaimer(user_request, plan, safe_art)
 
         logger.info(f"📝 Request: {user_request}")
-        logger.info(f"🧠 Plan: {plan}")
+        logger.info(f"📦 Container: {full_text[:50]}...") # 로그 확인용
         logger.info(f"🎨 Final Art:\n{final_art}")
 
         success = await send_kakao(final_art)

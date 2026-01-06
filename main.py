@@ -27,7 +27,7 @@ app.add_middleware(
 )
 
 # =========================================================
-# 🔐 Kakao Token Management
+# 🔐 Kakao Token
 # =========================================================
 CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
 
@@ -55,7 +55,7 @@ async def send_kakao(content: str):
         refresh_kakao_token()
 
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-
+    
     def post_request(token):
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
@@ -68,7 +68,7 @@ async def send_kakao(content: str):
         return requests.post(url, headers=headers, data=payload)
 
     res = post_request(CURRENT_ACCESS_TOKEN)
-
+    
     if res.status_code == 401:
         if refresh_kakao_token():
             res = post_request(CURRENT_ACCESS_TOKEN)
@@ -78,31 +78,7 @@ async def send_kakao(content: str):
     return res.status_code == 200
 
 # =========================================================
-# 🧹 데이터 정제 (가위질 로직 추가)
-# =========================================================
-
-def clean_text(text: str) -> str:
-    """Markdown 및 불필요한 기호 제거"""
-    if not text: return ""
-    text = re.sub(r"^```[a-zA-Z]*\n", "", text, flags=re.MULTILINE)
-    text = re.sub(r"```$", "", text, flags=re.MULTILINE)
-    text = text.strip().strip('"').strip("'")
-    return text
-
-def truncate_art(text: str, max_lines: int = 15) -> str:
-    """
-    [핵심 수정] AI가 폭주해서 너무 길게 그리면 강제로 자름.
-    카톡 화면을 고려해 15~20줄이 적당함.
-    """
-    lines = text.splitlines()
-    if len(lines) > max_lines:
-        logger.warning(f"⚠️ Art too long ({len(lines)} lines). Truncating.")
-        # 잘린 부분 알림
-        return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
-    return text
-
-# =========================================================
-# 🧠 MASTER ART PROMPT (길이 제한 규칙 추가)
+# 🧠 통합 프롬프트 (계획+그림 합체)
 # =========================================================
 MASTER_INSTRUCTION = """
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
@@ -193,14 +169,53 @@ Choose the best style and generate ONLY the final art string.
 
 """
 
-PLANNING_PROMPT = """
-[STEP 1: PLAN]
-Before generating the final art string, explain your plan:
-1. Selected Style: (1, 2, 3, or 4)
-2. Palette/Char: Which blocks/emojis will you use? & What is the Background emoji? (e.g., "Use 🟩 for Snake, 🌿 for BG")
-3. Geometry: How will you draw the shape? (e.g., "Draw a circle in the center")
+# =========================================================
+# ✂️ 파서 (Parser) & 유틸리티
+# =========================================================
+def parse_response(full_content: str):
+    """
+    [PLAN]과 [ART]를 분리합니다.
+    """
+    plan_part = ""
+    art_part = ""
 
-"""
+    # [ART] 태그 기준으로 나눔
+    if "[ART]" in full_content:
+        parts = full_content.split("[ART]")
+        plan_part = parts[0].replace("[PLAN]", "").strip()
+        art_part = parts[1].strip()
+    else:
+        # 태그가 없으면 전체를 아트라고 가정 (혹은 실패)
+        art_part = full_content.strip()
+    
+    return plan_part, art_part
+
+def clean_text(text: str) -> str:
+    if not text: return ""
+    text = re.sub(r"^```[a-zA-Z]*\n", "", text, flags=re.MULTILINE)
+    text = re.sub(r"```$", "", text, flags=re.MULTILINE)
+    text = text.strip().strip('"').strip("'")
+    return text
+
+def truncate_art(text: str, max_lines: int = 15) -> str:
+    lines = text.splitlines()
+    if len(lines) > max_lines:
+        return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
+    return text
+
+def append_disclaimer(user_request: str, plan: str, art: str) -> str:
+    # 플랜이나 아트 내용에서 스타일 4(ASCII) 감지
+    is_ascii = "4" in plan or "ASCII" in plan.upper() or "BLOCK" in plan.upper()
+    
+    if not is_ascii:
+        return art
+
+    has_hangul = bool(re.search(r'[가-힣]', user_request))
+    
+    if has_hangul:
+        return art + "\n\n(人 > <,,) 한글 아스키아트는 아직 미지원이에요.."
+    else:
+        return art + "\n\n(人 > <,,) 텍스트 아스키아트는 아직 불완전할 수 있어요."
 
 # =========================================================
 # MCP (SSE)
@@ -238,7 +253,7 @@ async def sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "14.0-safety-cut"}
+                "serverInfo": {"name": "t3xtart", "version": "16.0-single-arg-fix"}
             }
         })
 
@@ -249,21 +264,18 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate Witty & Rectangular Text Art. Must Plan first.",
+                    "description": "Generate Witty Text Art. Output must follow [PLAN]...[ART]... format.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "user_request": {"type": "string"},
-                            "design_plan": {
+                            # [핵심] 파라미터 하나로 통합!
+                            "full_content": {
                                 "type": "string",
-                                "description": PLANNING_PROMPT
-                            },
-                            "final_art_grid": {
-                                "type": "string",
-                                "description": MASTER_INSTRUCTION + "\n\nOUTPUT ONLY THE ART STRING."
+                                "description": MASTER_INSTRUCTION
                             }
                         },
-                        "required": ["user_request", "design_plan", "final_art_grid"]
+                        "required": ["user_request", "full_content"]
                     }
                 }]
             }
@@ -272,22 +284,26 @@ async def sse_post(request: Request):
     if method == "tools/call":
         args = body["params"]["arguments"]
         user_request = args.get("user_request", "")
-        plan = args.get("design_plan", "")
-        raw_art = args.get("final_art_grid", "")
-
-        # 1. 정제 (Markdown 제거)
+        
+        # 1. 통합된 응답 받기
+        full_content = args.get("full_content", "")
+        
+        # 2. 파이썬이 분리 수술 집도 ([PLAN]과 [ART] 쪼개기)
+        plan, raw_art = parse_response(full_content)
+        
+        # 3. 정제
         clean_art = clean_text(raw_art)
-
-        # [NEW] 2. 안전장치: 길이 제한 (15줄 넘어가면 자름)
         safe_art = truncate_art(clean_art, max_lines=15)
+        final_art = append_disclaimer(user_request, plan, safe_art)
 
         logger.info(f"📝 Request: {user_request}")
-        logger.info(f"🎨 Art (Safe):\n{safe_art}")
+        logger.info(f"🧠 Plan: {plan}")
+        logger.info(f"🎨 Art: {safe_art}")
 
         if not safe_art.strip():
-            safe_art = "(🎨 생성된 아구가 비어있습니다. 다시 시도해주세요.)"
+            final_art = "(🎨 생성된 아구가 비어있습니다. 다시 시도해주세요.)"
 
-        success = await send_kakao(safe_art)
+        success = await send_kakao(final_art)
         result_msg = "✅ 전송 완료" if success else "❌ 전송 실패"
 
         return JSONResponse({

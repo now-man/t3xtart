@@ -341,14 +341,21 @@ async def sse_post(request: Request):
         # 3. 정제
         clean_art = clean_text(raw_art)
 
-        # 4. 빈 값 방어
+        # 4. 빈 값 방어 (ART 기준)
         if not clean_art.strip():
-            # 만약 [ART] 태그를 못 찾았거나 내용이 없으면
-            # 혹시 full_text 전체가 그림일 수도 있으니 그걸 써본다.
-            if len(full_text) > 20 and ("⬜" in full_text or "⬛" in full_text):
-                 clean_art = clean_text(full_text)
+            # [ART]를 못 찾았지만, full_text에 그림이 있을 수 있음
+            if full_text.strip():
+                # 전체를 다시 파싱 시도
+                _, fallback_art = parse_full_response(full_text)
+                fallback_art = clean_text(fallback_art)
+        
+                if fallback_art.strip():
+                    clean_art = fallback_art
+                else:
+                    clean_art = "(🎨 그림을 생성하지 못했어요. 다시 한 번 요청해 주세요!)"
             else:
-                clean_art = f"(🎨 그림 데이터가 누락되었습니다. 다시 시도해주세요.)\n\n[Plan]\n{plan}"
+                clean_art = "(🎨 그림 데이터가 비어 있습니다. 다시 시도해주세요.)"
+
 
         # 5. 안전장치 (길이 제한 & 안내 멘트)
         safe_art = truncate_art(clean_art, max_lines=15)

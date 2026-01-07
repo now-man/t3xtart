@@ -318,7 +318,22 @@ async def sse_post(request: Request):
         user_request = args.get("user_request", "")
 
         # 1. 단일 컨테이너에서 꺼내기
-        full_text = args.get("response_container", "")
+        full_text = args.get("response_container")
+
+        # 🔥 MCP가 response_container를 안 줄 경우 대비
+        if not full_text:
+            # MCP 표준: body["params"]["_meta"]["rawResponse"] 또는 content
+            full_text = ""
+
+            contents = body.get("params", {}).get("content")
+            if isinstance(contents, list):
+                for c in contents:
+                    if c.get("type") == "text":
+                        full_text += c.get("text", "") + "\n"
+        
+            # 최후 수단: arguments 전체를 문자열화
+            if not full_text.strip():
+                full_text = json.dumps(args, ensure_ascii=False)
 
         # 2. 파이썬 분해 작업
         plan, raw_art = parse_full_response(full_text)

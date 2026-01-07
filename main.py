@@ -322,10 +322,9 @@ async def sse_post(request: Request):
 
         # 🔥 MCP가 response_container를 안 줄 경우 대비
         if not full_text:
-            # MCP 표준: body["params"]["_meta"]["rawResponse"] 또는 content
             full_text = ""
 
-            contents = body.get("params", {}).get("content")
+            contents = body.get("content")
             if isinstance(contents, list):
                 for c in contents:
                     if c.get("type") == "text":

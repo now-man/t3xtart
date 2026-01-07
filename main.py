@@ -83,8 +83,7 @@ async def send_kakao(content: str):
 def clean_text(text: str) -> str:
     if not text: return ""
     text = re.sub(r"^[a-zA-Z]*\n", "", text, flags=re.MULTILINE)
-    text = re.sub(r"
-$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"```$", "", text, flags=re.MULTILINE) 
     text = text.strip().strip('"').strip("'")
     return text
 
@@ -198,6 +197,11 @@ Choose the best style and generate ONLY the final art string.
 [YOUR GOAL]
 You MUST generate the Design Plan AND the Final Art in a SINGLE output string.
 Do not separate them into different arguments.
+
+[CRITICAL INSTRUCTION]
+1. You MUST use the `art_lines` argument to output the art.
+2. Do NOT output the art in the chat window. Put it INSIDE the JSON list.
+3. `art_lines` is a LIST of strings, where each string is one row of the art.
 
 Choose the best style and generate ONLY the final art string.
 """

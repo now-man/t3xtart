@@ -1,3 +1,4 @@
+
 import os
 import json
 import logging
@@ -78,12 +79,13 @@ async def send_kakao(content: str):
     return res.status_code == 200
 
 # =========================================================
-# 🧹 데이터 정제
+# 🧹 데이터 정제 및 유틸리티
 # =========================================================
 def clean_text(text: str) -> str:
+    """Markdown 및 불필요한 기호 제거"""
     if not text: return ""
-    text = re.sub(r"^[a-zA-Z]*\n", "", text, flags=re.MULTILINE)
-    text = re.sub(r"```$", "", text, flags=re.MULTILINE) 
+    text = re.sub(r"^```[a-zA-Z]*\n", "", text, flags=re.MULTILINE)
+    text = re.sub(r"```$", "", text, flags=re.MULTILINE)
     text = text.strip().strip('"').strip("'")
     return text
 
@@ -94,18 +96,36 @@ def truncate_art(text: str, max_lines: int = 15) -> str:
     return text
 
 def append_disclaimer(user_request: str, plan: str, art: str) -> str:
-    is_ascii = "4" in plan or "ASCII" in plan.upper() or "BLOCK" in plan.upper()
-    if not is_ascii:
+    """
+    [똑똑해진 안내 멘트 로직]
+    단순히 한글 요청이라고 띄우는 게 아니라, AI가 '글자'를 그리려고 했을 때만 띄웁니다.
+    """
+    # 1. 스타일 확인 (아스키/블록 아트가 아니면 통과)
+    is_ascii_style = "4" in plan or "ASCII" in plan.upper() or "BLOCK" in plan.upper()
+    if not is_ascii_style:
         return art
 
-    has_hangul = bool(re.search(r'[가-힣]', user_request))
-    if has_hangul:
+    # 2. 요청 언어 확인
+    has_hangul_input = bool(re.search(r'[가-힣]', user_request))
+
+    # 3. [핵심] AI의 의도(Plan) 확인: 글자(Text/Character)를 그리려는 의도가 있는가?
+    plan_lower = plan.lower()
+    text_rendering_keywords = ["text", "letter", "char", "word", "alphabet", "글자", "문자", "한글"]
+    is_text_rendering_intent = any(k in plan_lower for k in text_rendering_keywords)
+
+    # 4. 조건 조합하여 멘트 결정
+    if has_hangul_input and is_text_rendering_intent:
+        # 한글 요청 + 글자 그리기 의도 = 한글 미지원 멘트
         return art + "\n\n(人 > <,,) 한글 아스키아트는 아직 미지원이에요.."
-    else:
+    elif is_text_rendering_intent:
+        # 영문/숫자 요청 + 글자 그리기 의도 = 일반 텍스트 불안정 멘트
         return art + "\n\n(人 > <,,) 텍스트 아스키아트는 아직 불완전할 수 있어요."
+    else:
+        # 사물(눈사람 등)을 그린 경우 = 멘트 없음
+        return art
 
 # =========================================================
-# 🧠 MASTER PROMPT (JSON LIST 강제)
+# 🧠 MASTER PROMPT
 # =========================================================
 MASTER_INSTRUCTION = """
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
@@ -163,7 +183,7 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 - Ex: "Sad" -> (｡•́︿•̀｡)
 
 ### 4. 아스키 아트 (ASCII / Braille) ; 특수기호나 점자를 이용한 아트
-- Strategy: Use lines, dots, blocks for complex shapes.
+- Strategy: Use lines, dots, blocks for complex shapes. You can make English text or number text(Use BLOCK elements (█) for better visibility of SHAPES or TEXT).
 - Ex: "Cat Heart":
 ˚∧＿∧   　+        —̳͟͞͞💗
 (  •‿• )つ  —̳͟͞͞ 💗
@@ -176,7 +196,13 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 ⠀⠀⠀⠀⠐⢌⠪⠸⠠⡁⠆⢋⠠⠠⡠⡀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⡢⡃⡇⡓⠀⠥⡡⢊⢌⠆⠎⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠃⠃⠁⠀⡁⠈⢪⢪⢪⡂⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⡀⠀⠁⠑⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⡀⠀⠁⠑⠀⠀⠀
+- Ex "HI" (Text):
+  [
+    "█░█ █",
+    "█▀█ █",
+    "█░█ █"
+  ]
 ---
 
 [CRITICAL RULES FOR RECTANGULAR GRID]
@@ -249,7 +275,7 @@ async def sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "21.0-force-list"}
+                "serverInfo": {"name": "t3xtart", "version": "23.0-smart-disclaimer"}
             }
         })
 
@@ -269,7 +295,6 @@ async def sse_post(request: Request):
                                 "type": "string",
                                 "description": PLANNING_PROMPT
                             },
-                            # [핵심] 리스트(Array)로 정의하여 AI가 데이터를 채우도록 유도
                             "art_lines": {
                                 "type": "array",
                                 "items": {"type": "string"},
@@ -290,7 +315,7 @@ async def sse_post(request: Request):
         # 1. 리스트 가져오기
         art_lines = args.get("art_lines", [])
 
-        # 2. 리스트 조립 (혹시 문자열로 왔을 경우 방어)
+        # 2. 리스트 조립
         if isinstance(art_lines, list):
             raw_art = "\n".join(art_lines)
         else:
@@ -304,7 +329,7 @@ async def sse_post(request: Request):
             logger.warning("⚠️ Empty Art. Fallback triggered.")
             clean_art = f"(🎨 그림 데이터가 누락되었습니다. 다시 시도해주세요.)\n\n[Plan]\n{plan}"
 
-        # 5. 안전장치
+        # 5. 안전장치 (똑똑해진 안내 멘트 적용)
         safe_art = truncate_art(clean_art, max_lines=15)
         final_art = append_disclaimer(user_request, plan, safe_art)
 

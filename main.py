@@ -154,8 +154,8 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 - Ex: "Sad" -> (｡•́︿•̀｡)
 - Ex: "Exhaustion with bread" -> (；・∀・)🍞💨
 
-### 4. 아스키 아트 (ASCII / Braille) ; 특수기호나 점자를 이용한 중간 크기 이상의 아트
-- Strategy: Use lines, dots, blocks for complex shapes. You can make English text or number text(Use BLOCK elements (█) for better visibility of SHAPES or TEXT).
+### 4. 아스키 아트 (ASCII art / Braille) ; 특수기호나 점자를 이용한 중간 크기 이상의 아트
+- Strategy: Use lines, dots, blocks for complex shapes.=).
 - Ex: "Cat Heart":
 ˚∧＿∧   　+        —̳͟͞͞💗
 (  •‿• )つ  —̳͟͞͞ 💗
@@ -169,12 +169,17 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 ⠀⠀⠀⠀⠀⡢⡃⡇⡓⠀⠥⡡⢊⢌⠆⠎⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠃⠃⠁⠀⡁⠈⢪⢪⢪⡂⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⡀⠀⠁⠑⠀⠀⠀
-- Ex "HI" (Text):
-  [
-    "█░█ █",
-    "█▀█ █",
-    "█░█ █"
-  ]
+- Ex: "Jindo dog"
+　 ／＞　 フ
+　| 　_　_|
+／ ミ＿xノ
+/　　　　 | 
+/　 ヽ　　 ﾉ
+│　　|　|　|
+／￣|　　 |　|
+(￣ヽ＿_ヽ_)__)
+＼二)
+
 ---
 
 [CRITICAL RULES FOR RECTANGULAR GRID]

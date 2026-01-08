@@ -299,7 +299,7 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate Text Art. You MUST provide 'art_lines' as a JSON List.",
+                    "description": "💬사용자의 대화 명령을 기반으로 창의적으로 생성한 🎨이모지 아트를 카카오톡으로 전송해요.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

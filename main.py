@@ -105,13 +105,13 @@ MASTER_INSTRUCTION = """
 Choose ONE style from the 4 categories below based on the user's request and generate the art string.
 
 ---
-### 1. 한 줄 이모지 아트 (Simple Line) ; 한 줄 이모지 아트 ; 간단한 도트 아트
+### 1. 한 줄 이모지 아트 (Simple Line)
 - Strategy: Combine emojis to represent a concept in one line.
 - Ex: "2026" -> 2️⃣0️⃣2️⃣6️⃣
 - Ex: "Grass Monkey" -> 🌿🐒
 - Ex: "Love Meat" -> 🧑❤️🍖
 
-### 2. 여러 줄 이모지 아트 (Pixel Grid Art) ; 도트 아트 ; 픽셀 아트
+### 2. 여러 줄 이모지 아트 (Pixel Grid Art) ; 도트 아트 ; 픽셀 아트 ; 그리드 아트
 - Strategy: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) to draw the shape.
 - CRITICAL RULE: Differentiate Subject vs Background. Use Negative Space.
 - Ex: "Burning Jellyfish":
@@ -147,14 +147,14 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 ⬛⬛🟦🟦🟩🟩🟦⬛⬛
 ⬛⬛⬛🟦🟦🟦⬛⬛⬛
 
-### 3. 카오모지 (Kaomoji) ; 특수문자 ; 간단한 이모티콘
+### 3. 카오모지 (Kaomoji) ; 한 줄 특수문자 아트; 간단한 이모티콘
 - Strategy: One-line special characters.
 - Ex: "Fighting" -> (ง •̀_•́)ง
 - Ex: "Running" -> (งᐖ)ว
 - Ex: "Sad" -> (｡•́︿•̀｡)
 - Ex: "Exhaustion with bread" -> (；・∀・)🍞💨
 
-### 4. 아스키 아트 (ASCII / Braille) ; 특수기호나 점자를 이용한 아트
+### 4. 아스키 아트 (ASCII / Braille) ; 특수기호나 점자를 이용한 중간 크기 이상의 아트
 - Strategy: Use lines, dots, blocks for complex shapes. You can make English text or number text(Use BLOCK elements (█) for better visibility of SHAPES or TEXT).
 - Ex: "Cat Heart":
 ˚∧＿∧   　+        —̳͟͞͞💗

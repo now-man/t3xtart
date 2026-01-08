@@ -302,8 +302,7 @@ async def sse_post(request: Request):
             clean_art = f"(🎨 그림 데이터가 누락되었습니다. 다시 시도해주세요.)\n\n[Plan]\n{plan}"
 
         # 5. 안전장치 (똑똑해진 안내 멘트 적용)
-        safe_art = truncate_art(clean_art, max_lines=15)
-        final_art = append_disclaimer(user_request, plan, safe_art)
+        final_art = truncate_art(clean_art, max_lines=15)
 
         logger.info(f"📝 Request: {user_request}")
         logger.info(f"🎨 Final Art:\n{final_art}")

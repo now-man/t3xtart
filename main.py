@@ -95,35 +95,6 @@ def truncate_art(text: str, max_lines: int = 15) -> str:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
     return text
 
-def append_disclaimer(user_request: str, plan: str, art: str) -> str:
-    """
-    [똑똑해진 안내 멘트 로직]
-    단순히 한글 요청이라고 띄우는 게 아니라, AI가 '글자'를 그리려고 했을 때만 띄웁니다.
-    """
-    # 1. 스타일 확인 (아스키/블록 아트가 아니면 통과)
-    is_ascii_style = "4" in plan or "ASCII" in plan.upper() or "BLOCK" in plan.upper()
-    if not is_ascii_style:
-        return art
-
-    # 2. 요청 언어 확인
-    has_hangul_input = bool(re.search(r'[가-힣]', user_request))
-
-    # 3. [핵심] AI의 의도(Plan) 확인: 글자(Text/Character)를 그리려는 의도가 있는가?
-    plan_lower = plan.lower()
-    text_rendering_keywords = ["text", "letter", "char", "word", "alphabet", "글자", "문자", "한글"]
-    is_text_rendering_intent = any(k in plan_lower for k in text_rendering_keywords)
-
-    # 4. 조건 조합하여 멘트 결정
-    if has_hangul_input and is_text_rendering_intent:
-        # 한글 요청 + 글자 그리기 의도 = 한글 미지원 멘트
-        return art + "\n\n(人 > <,,) 한글 아스키아트는 아직 미지원이에요.."
-    elif is_text_rendering_intent:
-        # 영문/숫자 요청 + 글자 그리기 의도 = 일반 텍스트 불안정 멘트
-        return art + "\n\n(人 > <,,) 텍스트 아스키아트는 아직 불완전할 수 있어요."
-    else:
-        # 사물(눈사람 등)을 그린 경우 = 멘트 없음
-        return art
-
 # =========================================================
 # 🧠 MASTER PROMPT
 # =========================================================
@@ -181,6 +152,7 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 - Ex: "Fighting" -> (ง •̀_•́)ง
 - Ex: "Running" -> (งᐖ)ว
 - Ex: "Sad" -> (｡•́︿•̀｡)
+- Ex: "Exhaustion with bread" -> (；・∀・)🍞💨
 
 ### 4. 아스키 아트 (ASCII / Braille) ; 특수기호나 점자를 이용한 아트
 - Strategy: Use lines, dots, blocks for complex shapes. You can make English text or number text(Use BLOCK elements (█) for better visibility of SHAPES or TEXT).
@@ -286,7 +258,7 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate Text Art. You MUST provide 'art_lines' as a JSON List.",
+                    "description": "Generate Text Art. You must provide 'art_lines' as a JSON List.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

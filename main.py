@@ -1,4 +1,3 @@
-
 import os
 import json
 import logging
@@ -79,7 +78,7 @@ async def send_kakao(content: str):
     return res.status_code == 200
 
 # =========================================================
-# 🧹 데이터 정제 및 유틸리티
+# 🧹 데이터 정제
 # =========================================================
 def clean_text(text: str) -> str:
     """Markdown 및 불필요한 기호 제거"""
@@ -96,7 +95,7 @@ def truncate_art(text: str, max_lines: int = 15) -> str:
     return text
 
 # =========================================================
-# 🧠 MASTER PROMPT
+# 🧠 MASTER PROMPT (창의성 대폭발 버전)
 # =========================================================
 MASTER_INSTRUCTION = """
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
@@ -154,21 +153,24 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 - Ex: "Sad" -> (｡•́︿•̀｡)
 - Ex: "Exhaustion with bread" -> (；・∀・)🍞💨
 
-### 4. 아스키 아트 (ASCII art / Braille) ; 특수기호나 점자를 이용한 중간 크기 이상의 아트
-- Strategy: Use lines, dots, blocks for complex shapes.=).
+### 4. 아스키 아트 (ASCII / Unicode / Text Art); 특수기호, 유니코드를 이용한 중간 크기 이상의 아트
+- Target: "ASCII", "Unicode", "Creative Art"
+- Strategy: 
+  - UNLOCK ALL CHARACTERS: Use ANY Unicode symbol, geometric shape, Braille, or glyph to create the shape.
+  - Allowed: `/, \, |, _, (, ), @, #, %, &, *, +, =, <, >, ░, ▒, ▓, █, ▄, ▀, ■, ●, ◕, ᘏ, 🎀(any emoji like 🎁, 🎂), ▦, 田, ╭, ╮, ╯, ╰`
+  - Creativity: Don't just use lines. Use shapes to represent objects.
+- CRITICAL RULE: 
+  - Do NOT use colored background squares (⬛, ⬜). Use empty space or text blocks.
+  - Use '　' (Full-width space) for alignment.
+
+#### ✨ Creative ASCII Examples (Learn from these!):
+
 - Ex: "Cat Heart":
 ˚∧＿∧   　+        —̳͟͞͞💗
 (  •‿• )つ  —̳͟͞͞ 💗
 (つ　 <                —̳͟͞͞💗
 ｜　 _つ      +  —̳͟͞͞💗
 `し´
-- Ex: "Braille Clover":
-⠀⠀⠀⠀⠀⠀⠀⠀⢔⢕⢄⢄⠆⡄⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⡀⠄⢄⠑⡜⢐⠅⢕⠄⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠐⢌⠪⠸⠠⡁⠆⢋⠠⠠⡠⡀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⡢⡃⡇⡓⠀⠥⡡⢊⢌⠆⠎⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠃⠃⠁⠀⡁⠈⢪⢪⢪⡂⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠨⡀⠀⠁⠑⠀⠀⠀
 - Ex: "Jindo dog"
 　 ／＞　 フ
 　| 　_　_|
@@ -179,6 +181,25 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 ／￣|　　 |　|
 (￣ヽ＿_ヽ_)__)
 ＼二)
+- Ex "House":
+ ╱◥▦◣   
+│  田 │ 田│
+  ]
+- Ex "Volume" (Using Blocks `▄ █ ▓ ░`):
+   .ılı.——Volume——.ılı.
+     ▄ █ ▄ █ ▄ ▄ █ ▄ █ ▄ █
+ Min- – – – – – – – – -●Max
+
+- Ex "Cute Bunny":
+|ᘏ⑅ᘏ  .🎀⸒⸒
+| ᴗ͈.ᴗ͈⸝⸝꒱"
+
+- Ex "Trapped":
+
+┏┯┯┯┯┯┓
+┃││∧ ∧│┃
+┃│  (≧Д≦) ┃
+┗┷┷┷┷┷┛
 
 ---
 
@@ -207,13 +228,28 @@ Do not separate them into different arguments.
 3. `art_lines` is a LIST of strings, where each string is one row of the art.
 
 Choose the best style and generate ONLY the final art string.
+
+---
+
+[RULES BY STYLE]
+IF Style 2 (Pixel Art):
+- 🧱 FILL THE VOID: Do NOT stop drawing in the middle. Fill with Background Emoji.
+
+IF Style 4 (ASCII/Unicode Art):
+- 🔓 USE DIVERSE SYMBOLS: Use `▓`, `▒`, `░` for shading (like battery). Use `▄`, `▀`, `█` for solid shapes. Use `ᘏ`, `◕` for cute faces.
+- 🚫 NO PIXEL SQUARES: Do NOT use `⬛` or `⬜`.
+
+[OUTPUT INSTRUCTION]
+- `design_plan`: Briefly explain your style, palette, and geometry.
+- `art_lines`: The actual art. Must be a JSON Array of strings.
 """
 
 PLANNING_PROMPT = """
-Before generating the final art string, explain your plan:
+Before generating the `art_lines`, explain your plan in `design_plan`:
 1. Selected Style: (1, 2, 3, or 4)
-2. Palette/Char: Which blocks/emojis will you use? & What is the Background emoji? (e.g., "Use 🟩 for Snake, 🌿 for BG")
-3. Geometry: How will you draw the shape? (e.g., "Draw a circle in the center")
+2. Palette/Char: 
+   - If Style 4: Which creative Unicode symbols or blocks will you use? (e.g., "Use ▓ for battery level", "Use ᘏ for ears")
+3. Geometry: How will you draw the shape?
 """
 
 # =========================================================
@@ -252,7 +288,7 @@ async def sse_post(request: Request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "t3xtart", "version": "23.0-smart-disclaimer"}
+                "serverInfo": {"name": "t3xtart", "version": "26.0-creative-unicode"}
             }
         })
 
@@ -263,7 +299,7 @@ async def sse_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "Generate Text Art. You must provide 'art_lines' as a JSON List.",
+                    "description": "Generate Text Art. You MUST provide 'art_lines' as a JSON List.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -304,9 +340,9 @@ async def sse_post(request: Request):
         # 4. 빈 값 방어
         if not clean_art.strip():
             logger.warning("⚠️ Empty Art. Fallback triggered.")
-            clean_art = f"(🎨 그림 데이터가 누락되었습니다. 다시 시도해주세요.)\n\n[Plan]\n{plan}"
+            clean_art = "(人 > <,,) 아트를 그릴 수 없었어요.. 채팅을 살짝 바꾸어 시도해보세요!"
 
-        # 5. 안전장치 (똑똑해진 안내 멘트 적용)
+        # 5. 안전장치 (길이 제한만 적용)
         final_art = truncate_art(clean_art, max_lines=15)
 
         logger.info(f"📝 Request: {user_request}")

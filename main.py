@@ -350,7 +350,7 @@ async def handle_mcp_post(request: Request):
     if method == "tools/call":
         params = body.get("params", {})
         args = params.get("arguments", {})
-        
+
         user_request = args.get("user_request", "")
         plan = args.get("design_plan", "")
         art_lines = args.get("art_lines", [])

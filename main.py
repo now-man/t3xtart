@@ -21,7 +21,7 @@ app = FastAPI()
 # 보안: CORS 및 Origin 검증 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,14 +33,14 @@ app.add_middleware(
 def validate_origin(request: Request) -> bool:
     origin = request.headers.get("origin")
     if origin is None:
-        return True 
+        return True
 
     allowed = [
         "https://playmcp.kakao.com",   # PlayMCP
         "https://chat.openai.com",     # ChatGPT MCP
         "https://claude.ai",           # Claude MCP
     ]
-    return origin in allowed or True 
+    return origin in allowed or True
 
 # =========================================================
 # 🔐 Kakao Token
@@ -257,6 +257,54 @@ IF Style 4 (ASCII/Unicode Art):
 [OUTPUT INSTRUCTION]
 - `design_plan`: Briefly explain your style, palette, and geometry.
 - `art_lines`: The actual art. Must be a JSON Array of strings.
+
+### 🔥 MULTI-VARIATION MODE (Important)
+
+If the user's request is:
+
+- vague
+- short (less than ~12 characters)
+- contains words like:
+  - "여러", "다양", "다르게", "후보", "버전", "여러 가지", "많이"
+
+👉 Then DO THIS:
+
+1. Generate 3–5 different, more specific interpretations.
+2. For each interpretation:
+   - write a short caption (1 line)
+   - generate a separate art block
+3. Combine all results in order.
+
+📌 Output Structure Example
+
+1) Caption
+<art 1>
+
+2) Caption
+<art 2>
+
+3) Caption
+<art 3>
+
+Rules:
+- Each art block must follow the same style constraints as above.
+- Emoji grid width must be consistent per block.
+- Avoid Markdown fences like ``` ... ```
+- Avoid surrounding brackets like [ ... ]
+- Each block separated by one blank line.
+
+---
+
+### If user explicitly asks for "only one" drawing:
+→ DO NOT activate multi-variation mode.
+
+NEVER wrap the art or any emoji block inside:
+- triple backticks ```
+- square brackets [ ]
+- quotation marks
+
+Output must be plain text only.
+
 """
 
 PLANNING_PROMPT = """

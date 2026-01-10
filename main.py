@@ -103,7 +103,7 @@ def clean_text(text: str) -> str:
     text = text.strip().strip('"').strip("'")
     return text
 
-def truncate_art(text: str, max_lines: int = 15) -> str:
+def truncate_art(text: str, max_lines: int = 130) -> str:
     lines = text.splitlines()
     if len(lines) > max_lines:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"

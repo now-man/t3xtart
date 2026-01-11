@@ -429,7 +429,7 @@ async def handle_mcp_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성합니다. 유저가 원하면 'variations'를 통해 여러 버전을 생성할 수 있습니다.",
+                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성하고 카카오톡으로 전송합니다.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -438,34 +438,17 @@ async def handle_mcp_post(request: Request):
                                 "type": "string",
                                 "description": PLANNING_PROMPT
                             },
-                            # [핵심] 다중 아트를 지원하는 variations 스키마
-                            "variations": {
+                            "art_lines": {
                                 "type": "array",
-                                "description": MASTER_INSTRUCTION, # 여기에 프롬프트 주입
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "description": {
-                                            "type": "string", 
-                                            "description": "Scenario description (Korean title)"
-                                        },
-                                        "art_lines": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                            "description": "The art grid lines"
-                                        }
-                                    },
-                                    "required": ["description", "art_lines"]
-                                }
+                                "items": {"type": "string"},
+                                "description": MASTER_INSTRUCTION
                             }
                         },
-                        "required": ["user_request", "design_plan", "variations"]
+                        "required": ["user_request", "design_plan", "art_lines"]
                     }
                 }]
             }
         })
-
-        
 
     # ================================
     # 4) tools/call
@@ -475,39 +458,25 @@ async def handle_mcp_post(request: Request):
         args = params.get("arguments", {})
 
         user_request = args.get("user_request", "")
-        # variations 리스트 가져오기
-        variations = args.get("variations", [])
+        # design_plan은 AI가 생각하는 용도
+        art_lines = args.get("art_lines", [])
 
-        final_content = []
+        if isinstance(art_lines, list):
+            raw_art = "\n".join(art_lines)
+        else:
+            raw_art = str(art_lines)
 
-        # 여러 개의 아트 순회 및 메시지 조립
-        for idx, item in enumerate(variations):
-            desc = item.get("description", "Art")
-            lines = item.get("art_lines", [])
+        clean_art = clean_text(raw_art)
 
-            if isinstance(lines, list):
-                raw_art = "\n".join(lines)
-            else:
-                raw_art = str(lines)
-            
-            clean_art = clean_text(raw_art)
-            safe_art = truncate_art(clean_art, max_lines=15)
-            
-            if not safe_art.strip():
-                safe_art = "(人 > <,,) 아트를 그릴 수 없었어요.."
-            
-            # 구분선 및 번호 붙이기 (2개 이상일 때만)
-            header = f"🎨 Ver {idx+1}. {desc}" if len(variations) > 1 else desc
-            final_content.append(f"{header}\n{safe_art}")
+        if not clean_art.strip():
+            clean_art = "(人 > <,,) 아트를 그릴 수 없었어요.. 채팅을 살짝 바꾸어 시도해 주세요!"
 
-        full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
-
-        if not full_message.strip():
-             full_message = "(人 > <,,) 생성된 결과가 없어요. 다시 시도해 주세요!"
+        final_art = truncate_art(clean_art, max_lines=130)
 
         logger.info(f"Request: {user_request}")
+        logger.info(f"Art:\n{final_art}")
 
-        success = await send_kakao(full_message)
+        success = await send_kakao(final_art)
         result_msg = "✅ 전송 완료" if success else "❌ 전송 실패"
 
         return JSONResponse({
@@ -517,7 +486,11 @@ async def handle_mcp_post(request: Request):
                 "content": [
                     {
                         "type": "text",
-                        "text": f"🎨 t3xtart 결과입니다.\n(카카오톡으로도 전송되었어요!)\n\n{full_message}"
+                        "text": "🎨 t3xtart 결과입니다.\n(카카오톡으로도 전송되었어요!)"
+                    },
+                    {
+                        "type": "text",
+                        "text": final_art
                     }
                 ]
             }

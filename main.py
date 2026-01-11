@@ -103,7 +103,7 @@ def clean_text(text: str) -> str:
     text = text.strip().strip('"').strip("'")
     return text
 
-def truncate_art(text: str, max_lines: int = 130) -> str:
+def truncate_art(text: str, max_lines: int = 15) -> str:
     lines = text.splitlines()
     if len(lines) > max_lines:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
@@ -431,7 +431,7 @@ async def handle_mcp_post(request: Request):
         if not clean_art.strip():
             clean_art = "(人 > <,,) 아트를 그릴 수 없었어요.. 채팅을 살짝 바꾸어 시도해 주세요!"
 
-        final_art = truncate_art(clean_art, max_lines=15)
+        final_art = truncate_art(clean_art, max_lines=130)
 
         logger.info(f"Request: {user_request}")
         logger.info(f"Art:\n{final_art}")

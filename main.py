@@ -486,11 +486,7 @@ async def handle_mcp_post(request: Request):
                 "content": [
                     {
                         "type": "text",
-                        "text": "🎨 t3xtart 결과입니다.\n(카카오톡으로도 전송되었어요!)"
-                    },
-                    {
-                        "type": "markdown",
-                        "text": "```\n" + final_art + "\n```"
+                        "text": f"🎨 t3xtart 결과입니다!\n\n{final_art}"
                     }
                 ]
             }

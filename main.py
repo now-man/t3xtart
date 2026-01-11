@@ -103,7 +103,7 @@ def clean_text(text: str) -> str:
     text = text.strip().strip('"').strip("'")
     return text
 
-def truncate_art(text: str, max_lines: int = 15) -> str:
+def truncate_art(text: str, max_lines: int = 130) -> str:
     lines = text.splitlines()
     if len(lines) > max_lines:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
@@ -260,31 +260,71 @@ IF Style 4 (ASCII/Unicode Art):
 
 ### 🔥 MULTI-VARIATION MODE (Important)
 
-If the user's request is:
+You normally return ONLY ONE final art.
 
-- vague
-- short (less than ~12 characters)
-- contains words like:
-  - "여러", "다양", "다르게", "후보", "버전", "여러 가지", "많이"
+However, enter **Variation Mode** and generate 3–5 candidates ONLY IF user explicitly asks for any of the following:
+
+- "여러 개"
+- "여러가지"
+- "여러 가지"
+- "후보"
+- "다양하게"
+- "몇 가지 버전"
+- "여러 버전"
+- "다른 스타일로도"
+- "여러 시도로"
+- "여러 후보를 보여줘"
+- "비교해서 고를게"
+- "골라볼 수 있게"
+- "많이"
+- "다르게"
 
 👉 Then DO THIS:
 
 1. Generate 3–5 different, more specific interpretations.
 2. For each interpretation:
-   - write a short caption (1 line)
+   - write a caption (1 line)
    - generate a separate art block
 3. Combine all results in order.
 
-📌 Output Structure Example
+When in Variation Mode:
 
-1) Caption
+1) DO NOT change expression type.
+   - If you chose Emoji Pixel Art → all candidates must be Emoji Pixel Art.
+   - If you chose ASCII Art → all must be ASCII Art.
+
+2) Each candidate must differ in:
+   - scene, layout, composition, subject action, or perspective
+   - NOT just tiny emoji swaps
+
+3) Each candidate MUST be formatted like:
+
+[제목1: 한글]
 <art 1>
 
-2) Caption
+[제목2: 한글]
 <art 2>
 
-3) Caption
+[제목3: 한글]
 <art 3>
+
+4) There MUST be exactly ONE empty line
+   between each block of art.
+
+5) Titles MUST be in Korean,
+   descriptive, e.g.:
+   - "잔디밭에서 활발히 경기를 하고 있는 축구장"
+   - "관객이 가득 찬 축구장"
+   - "비 오는 날의 축구장"
+   - "구름이 듬성듬성 있는 푸른 하늘 아래의 잔디밭 위 돌아다니는 선수들이 있는 축구장"
+
+6) Do NOT just change adjectives like “cute/sad/happy, Vary the SCENE itself.
+Generate 3–5 clearly different scenarios by changing:
+- background (sky, room, space, beach, forest)
+- action (running, sleeping, chasing, eating, playing)
+- viewpoint (top view, side view, close-up, far away)
+- interaction (with toy, butterfly, box, friends, food)
+- emoji set (⚽🏀🎣🪁🧶🦋🌙⭐🌧️)
 
 Rules:
 - Each art block must follow the same style constraints as above.
@@ -443,7 +483,16 @@ async def handle_mcp_post(request: Request):
             "jsonrpc": "2.0",
             "id": msg_id,
             "result": {
-                "content": [{"type": "text", "text": result_msg}]
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "🎨 t3xtart 결과입니다.\n(카카오톡으로도 전송되었어요!)"
+                    },
+                    {
+                        "type": "text",
+                        "text": final_art
+                    }
+                ]
             }
         })
 

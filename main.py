@@ -18,10 +18,9 @@ logger = logging.getLogger("t3xtart")
 
 app = FastAPI()
 
-# 보안: CORS 및 Origin 검증 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,64 +33,37 @@ def validate_origin(request: Request) -> bool:
     origin = request.headers.get("origin")
     if origin is None:
         return True
-
+    
     allowed = [
         "https://playmcp.kakao.com",   # PlayMCP
-        "https://chat.openai.com",     # ChatGPT MCP
-        "https://claude.ai",           # Claude MCP
+        "https://modelcontextprotocol.io",
+        "http://localhost:5173",
     ]
-    return origin in allowed or True
+    return origin in allowed
 
 # =========================================================
-# 🔐 Kakao Token
+# 📨 카카오 전송 (사용자 토큰 사용)
 # =========================================================
-CURRENT_ACCESS_TOKEN = os.environ.get("KAKAO_TOKEN")
-
-def refresh_kakao_token():
-    global CURRENT_ACCESS_TOKEN
-    url = "https://kauth.kakao.com/oauth/token"
-    data = {
-        "grant_type": "refresh_token",
-        "client_id": os.environ.get("KAKAO_CLIENT_ID"),
-        "refresh_token": os.environ.get("KAKAO_REFRESH_TOKEN"),
-        "client_secret": os.environ.get("KAKAO_CLIENT_SECRET"),
-    }
-    try:
-        res = requests.post(url, data=data, timeout=5)
-        if res.status_code == 200:
-            CURRENT_ACCESS_TOKEN = res.json().get("access_token")
-            return True
-    except Exception as e:
-        logger.error(f"Kakao token refresh failed: {e}")
-    return False
-
-async def send_kakao(content: str):
-    global CURRENT_ACCESS_TOKEN
-    if not CURRENT_ACCESS_TOKEN:
-        refresh_kakao_token()
-
+# [수정 1] 인자 순서 통일 (token, content)
+async def send_kakao(user_token: str, content: str):
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
+    headers = {"Authorization": f"Bearer {user_token}"}
+    
+    payload = {
+        "template_object": json.dumps({
+            "object_type": "text",
+            "text": f"🎨 t3xtart 도착!\n\n{content}",
+            "link": {"web_url": "https://playmcp.kakao.com"},
+        })
+    }
+    
+    try:
+        res = requests.post(url, headers=headers, data=payload, timeout=5)
+        return res.status_code == 200
+    except Exception as e:
+        logger.error(f"Kakao Send Error: {e}")
+        return False
 
-    def post_request(token):
-        headers = {"Authorization": f"Bearer {token}"}
-        payload = {
-            "template_object": json.dumps({
-                "object_type": "text",
-                "text": f"🎨 t3xtart 도착!\n\n{content}",
-                "link": {"web_url": "https://playmcp.kakao.com"},
-            })
-        }
-        return requests.post(url, headers=headers, data=payload)
-
-    res = post_request(CURRENT_ACCESS_TOKEN)
-
-    if res.status_code == 401:
-        if refresh_kakao_token():
-            res = post_request(CURRENT_ACCESS_TOKEN)
-        else:
-            return False
-
-    return res.status_code == 200
 
 # =========================================================
 # 🧹 데이터 정제
@@ -103,14 +75,14 @@ def clean_text(text: str) -> str:
     text = text.strip().strip('"').strip("'")
     return text
 
-def truncate_art(text: str, max_lines: int = 130) -> str:
+def truncate_art(text: str, max_lines: int = 150) -> str:
     lines = text.splitlines()
     if len(lines) > max_lines:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
     return text
 
 # =========================================================
-# 🧠 MASTER PROMPT (여기에 있는 내용이 AI의 뇌가 됩니다)
+# 🧠 MASTER PROMPT
 # =========================================================
 MASTER_INSTRUCTION = """
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
@@ -356,20 +328,18 @@ Before generating the `art_lines`, explain your plan in `design_plan`:
 """
 
 # =========================================================
-# 🚀 MCP Streamable HTTP Transport (New Spec 2025-03-26)
+# 🚀 MCP Streamable HTTP Transport
 # =========================================================
 
 @app.get("/mcp")
 async def handle_mcp_get(request: Request):
     if not validate_origin(request):
         return Response(status_code=403)
-
     accept = request.headers.get("accept", "")
     if "text/event-stream" not in accept:
         return Response(status_code=406)
 
     async def event_generator():
-        # 연결 초기화 이벤트 (선택사항)
         yield ': keep-alive\n\n'
         while True:
             await asyncio.sleep(10)
@@ -382,24 +352,20 @@ async def handle_mcp_get(request: Request):
 async def handle_mcp_post(request: Request):
     if not validate_origin(request):
         return Response(status_code=403)
-
+    
     try:
         body = await request.json()
     except:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    # 배치 요청 처리 (첫 번째만)
     if isinstance(body, list):
         body = body[0]
 
     method = body.get("method")
     msg_id = body.get("id")
 
-    # ================================
-    # 1) Initialize (Stateless 필수!)
-    # ================================
+    # 1) Initialize
     if method == "initialize":
-        # [수정됨] UUID 생성 및 Mcp-Session-Id 제거 (반려 사유 해결)
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -408,20 +374,16 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "28.0-final-submission"
+                    "version": "32.0-oauth-support"
                 }
             }
         })
 
-    # ================================
     # 2) notifications/initialized
-    # ================================
     if method == "notifications/initialized":
         return Response(status_code=200)
 
-    # ================================
-    # 3) tools/list (프롬프트 완벽 주입)
-    # ================================
+# 3) tools/list
     if method == "tools/list":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -429,7 +391,7 @@ async def handle_mcp_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성하고 카카오톡으로 전송합니다.",
+                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성하고, 사용자의 카카오톡 '나와의 채팅'으로 전송합니다.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -438,46 +400,82 @@ async def handle_mcp_post(request: Request):
                                 "type": "string",
                                 "description": PLANNING_PROMPT
                             },
-                            "art_lines": {
+                            "variations": {
                                 "type": "array",
-                                "items": {"type": "string"},
-                                "description": MASTER_INSTRUCTION
+                                "description": MASTER_INSTRUCTION,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "description": {"type": "string"},
+                                        "art_lines": {
+                                            "type": "array",
+                                            "items": {"type": "string"}
+                                        }
+                                    },
+                                    "required": ["description", "art_lines"]
+                                }
                             }
+                            # [수정 2] access_token 필드 삭제! (AI가 아니라 헤더에서 가져옴)
                         },
-                        "required": ["user_request", "design_plan", "art_lines"]
+                        "required": ["user_request", "design_plan", "variations"]
                     }
                 }]
             }
         })
 
-    # ================================
-    # 4) tools/call
-    # ================================
+
+  
+
+# 4) tools/call
     if method == "tools/call":
+        # [수정 3] 헤더에서 토큰 추출
+        auth_header = request.headers.get("Authorization")
+        user_token = None
+        if auth_header and auth_header.startswith("Bearer "):
+            user_token = auth_header.split(" ")[1]
+        if not user_token:
+            user_token = request.headers.get("X-Mcp-User-Token")
+
         params = body.get("params", {})
         args = params.get("arguments", {})
-
+        
         user_request = args.get("user_request", "")
-        # design_plan은 AI가 생각하는 용도
-        art_lines = args.get("art_lines", [])
+        # [수정 4] variations 로직 복구 (중요!)
+        variations = args.get("variations", []) 
 
-        if isinstance(art_lines, list):
-            raw_art = "\n".join(art_lines)
-        else:
-            raw_art = str(art_lines)
+        final_content = []
 
-        clean_art = clean_text(raw_art)
+        for idx, item in enumerate(variations):
+            desc = item.get("description", "Art")
+            lines = item.get("art_lines", [])
+            
+            if isinstance(lines, list): raw_art = "\n".join(lines)
+            else: raw_art = str(lines)
+            
+            clean_art = clean_text(raw_art)
+            safe_art = truncate_art(clean_art, max_lines=20)
+            
+            if not safe_art.strip(): safe_art = "(아트 생성 실패)"
+            
+            header = f"🎨 Ver {idx+1}. {desc}" if len(variations) > 1 else desc
+            final_content.append(f"{header}\n{safe_art}")
 
-        if not clean_art.strip():
-            clean_art = "(人 > <,,) 아트를 그릴 수 없었어요.. 채팅을 살짝 바꾸어 시도해 주세요!"
-
-        final_art = truncate_art(clean_art, max_lines=130)
+        full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
+        if not full_message.strip(): full_message = "생성된 결과가 없습니다."
 
         logger.info(f"Request: {user_request}")
-        logger.info(f"Art:\n{final_art}")
 
-        success = await send_kakao(final_art)
-        result_msg = "✅ 전송 완료" if success else "❌ 전송 실패"
+        # [전송 시도]
+        api_result_msg = ""
+        if user_token:
+            # send_kakao 함수 호출 (인자 순서 token, content)
+            success = await send_kakao(user_token, full_message)
+            if success:
+                api_result_msg = "\n(🔔 카카오톡 전송 완료!)"
+            else:
+                api_result_msg = "\n(⚠️ 카카오톡 전송 실패: 권한 확인 필요)"
+        else:
+            api_result_msg = "\n(🔒 카톡 미전송: OAuth 로그인이 필요합니다)"
 
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -486,23 +484,15 @@ async def handle_mcp_post(request: Request):
                 "content": [
                     {
                         "type": "text",
-                        "text": f"🎨 t3xtart 결과입니다!\n\n{final_art}"
+                        "text": f"🎨 t3xtart 결과{api_result_msg}\n\n{full_message}"
                     }
                 ]
             }
         })
-
-    # ================================
-    # 5) ping (스펙 준수용)
-    # ================================
+    
     if method == "ping":
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "result": {}
-        })
+        return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 
-    # 그 외 요청
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 
 @app.get("/")

@@ -414,14 +414,18 @@ async def handle_mcp_post(request: Request):
                                     },
                                     "required": ["description", "art_lines"]
                                 }
+                            },
+                            "access_token": {
+                                "type": "string",
+                                "description": "카카오 로그인 사용자의 액세스 토큰 (PlayMCP가 자동으로 주입)"
                             }
-                            # [수정 2] access_token 필드 삭제! (AI가 아니라 헤더에서 가져옴)
                         },
-                        "required": ["user_request", "design_plan", "variations"]
+                        "required": ["user_request", "design_plan", "variations", "access_token"]
                     }
                 }]
             }
         })
+
 
 
   
@@ -438,6 +442,9 @@ async def handle_mcp_post(request: Request):
 
         params = body.get("params", {})
         args = params.get("arguments", {})
+
+        # 🔑 PlayMCP가 자동으로 넣어준 사용자 토큰
+        user_token = args.get("access_token")
         
         user_request = args.get("user_request", "")
         # [수정 4] variations 로직 복구 (중요!)

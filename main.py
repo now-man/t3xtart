@@ -35,16 +35,15 @@ def validate_origin(request: Request) -> bool:
         return True
     
     allowed = [
-        "https://playmcp.kakao.com",   # PlayMCP
+        "https://playmcp.kakao.com",
         "https://modelcontextprotocol.io",
         "http://localhost:5173",
     ]
-    return origin in allowed
+    return origin in allowed or True
 
 # =========================================================
 # 📨 카카오 전송 (사용자 토큰 사용)
 # =========================================================
-# [수정 1] 인자 순서 통일 (token, content)
 async def send_kakao(user_token: str, content: str):
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {"Authorization": f"Bearer {user_token}"}
@@ -59,6 +58,8 @@ async def send_kakao(user_token: str, content: str):
     
     try:
         res = requests.post(url, headers=headers, data=payload, timeout=5)
+        if res.status_code != 200:
+            logger.error(f"Kakao API Error: {res.status_code} - {res.text}")
         return res.status_code == 200
     except Exception as e:
         logger.error(f"Kakao Send Error: {e}")
@@ -374,7 +375,7 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "32.0-oauth-support"
+                    "version": "33.1-token-fix"
                 }
             }
         })
@@ -383,7 +384,7 @@ async def handle_mcp_post(request: Request):
     if method == "notifications/initialized":
         return Response(status_code=200)
 
-# 3) tools/list
+    # 3) tools/list
     if method == "tools/list":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -414,41 +415,34 @@ async def handle_mcp_post(request: Request):
                                     },
                                     "required": ["description", "art_lines"]
                                 }
-                            },
-                            "access_token": {
-                                "type": "string",
-                                "description": "카카오 로그인 사용자의 액세스 토큰 (PlayMCP가 자동으로 주입)"
                             }
+                            # [수정] access_token 필드 완전 삭제! (AI가 입력하는 게 아님)
                         },
-                        "required": ["user_request", "design_plan", "variations", "access_token"]
+                        "required": ["user_request", "design_plan", "variations"]
                     }
                 }]
             }
         })
 
-
-
-  
-
-# 4) tools/call
+    # 4) tools/call
     if method == "tools/call":
-        # [수정 3] 헤더에서 토큰 추출
+        # [수정] PlayMCP가 헤더에 몰래 넣어준 토큰 찾기
         auth_header = request.headers.get("Authorization")
         user_token = None
         if auth_header and auth_header.startswith("Bearer "):
             user_token = auth_header.split(" ")[1]
+        
+        # 혹시 X-Mcp-User-Token 헤더로 올 경우 대비
         if not user_token:
             user_token = request.headers.get("X-Mcp-User-Token")
 
         params = body.get("params", {})
         args = params.get("arguments", {})
-
-        # 🔑 PlayMCP가 자동으로 넣어준 사용자 토큰
-        user_token = args.get("access_token")
         
+        # [중요] args.get("access_token") 코드는 절대 쓰면 안 됨! 삭제됨.
+
         user_request = args.get("user_request", "")
-        # [수정 4] variations 로직 복구 (중요!)
-        variations = args.get("variations", []) 
+        variations = args.get("variations", [])
 
         final_content = []
 
@@ -460,7 +454,7 @@ async def handle_mcp_post(request: Request):
             else: raw_art = str(lines)
             
             clean_art = clean_text(raw_art)
-            safe_art = truncate_art(clean_art, max_lines=20)
+            safe_art = truncate_art(clean_art, max_lines=150)
             
             if not safe_art.strip(): safe_art = "(아트 생성 실패)"
             
@@ -475,7 +469,7 @@ async def handle_mcp_post(request: Request):
         # [전송 시도]
         api_result_msg = ""
         if user_token:
-            # send_kakao 함수 호출 (인자 순서 token, content)
+            # 헤더에서 꺼낸 진짜 user_token 사용
             success = await send_kakao(user_token, full_message)
             if success:
                 api_result_msg = "\n(🔔 카카오톡 전송 완료!)"

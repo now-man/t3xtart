@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-import requests
 import uvicorn
 import asyncio
 import re
@@ -20,7 +19,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,40 +34,13 @@ def validate_origin(request: Request) -> bool:
         return True
     
     allowed = [
-        "https://playmcp.kakao.com",
+        "https://playmcp.kakao.com",   # PlayMCP
         "https://modelcontextprotocol.io",
         "http://localhost:5173",
     ]
     return origin in allowed or True
 
-# =========================================================
-# 📨 카카오 전송 (사용자 토큰 사용)
-# =========================================================
-async def send_kakao(user_token: str, content: str):
-    url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
-    headers = {"Authorization": f"Bearer {user_token}"}
-    
-    payload = {
-        "template_object": json.dumps({
-            "object_type": "text",
-            "text": f"🎨 t3xtart 도착!\n\n{content}",
-            "link": {"web_url": "https://playmcp.kakao.com"},
-        })
-    }
-    
-    try:
-        res = requests.post(url, headers=headers, data=payload, timeout=5)
-        
-        # [디버깅] 성공이 아닐 경우, 에러 내용(JSON)을 로그에 찍습니다.
-        if res.status_code != 200:
-            logger.error(f"❌ 카카오 전송 실패! 상태코드: {res.status_code}")
-            logger.error(f"❌ 에러 메시지: {res.text}")
-            
-        return res.status_code == 200
-    except Exception as e:
-        logger.error(f"❌ 요청 중 예외 발생: {e}")
-        return False
-
+# [삭제됨] send_kakao 함수 및 requests 의존성 제거
 
 # =========================================================
 # 🧹 데이터 정제
@@ -379,7 +351,7 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "33.1-token-fix"
+                    "version": "1.0.0-clean"
                 }
             }
         })
@@ -396,7 +368,7 @@ async def handle_mcp_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성하고, 사용자의 카카오톡 '나와의 채팅'으로 전송합니다.",
+                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성합니다.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -420,7 +392,6 @@ async def handle_mcp_post(request: Request):
                                     "required": ["description", "art_lines"]
                                 }
                             }
-                            # [수정] access_token 필드 완전 삭제! (AI가 입력하는 게 아님)
                         },
                         "required": ["user_request", "design_plan", "variations"]
                     }
@@ -430,21 +401,9 @@ async def handle_mcp_post(request: Request):
 
     # 4) tools/call
     if method == "tools/call":
-        # [수정] PlayMCP가 헤더에 몰래 넣어준 토큰 찾기
-        auth_header = request.headers.get("Authorization")
-        user_token = None
-        if auth_header and auth_header.startswith("Bearer "):
-            user_token = auth_header.split(" ")[1]
-        
-        # 혹시 X-Mcp-User-Token 헤더로 올 경우 대비
-        if not user_token:
-            user_token = request.headers.get("X-Mcp-User-Token")
-
         params = body.get("params", {})
         args = params.get("arguments", {})
         
-        # [중요] args.get("access_token") 코드는 절대 쓰면 안 됨! 삭제됨.
-
         user_request = args.get("user_request", "")
         variations = args.get("variations", [])
 
@@ -462,25 +421,18 @@ async def handle_mcp_post(request: Request):
             
             if not safe_art.strip(): safe_art = "(아트 생성 실패)"
             
-            header = f"🎨 Ver {idx+1}. {desc}" if len(variations) > 1 else desc
+            # 여러 개일 때만 번호 붙이기, 하나면 그냥 출력
+            if len(variations) > 1:
+                header = f"🎨 Ver {idx+1}. {desc}"
+            else:
+                header = f"🎨 {desc}"
+                
             final_content.append(f"{header}\n{safe_art}")
 
         full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
         if not full_message.strip(): full_message = "생성된 결과가 없습니다."
 
         logger.info(f"Request: {user_request}")
-
-        # [전송 시도]
-        api_result_msg = ""
-        if user_token:
-            # 헤더에서 꺼낸 진짜 user_token 사용
-            success = await send_kakao(user_token, full_message)
-            if success:
-                api_result_msg = "\n(🔔 카카오톡 전송 완료!)"
-            else:
-                api_result_msg = "\n(⚠️ 카카오톡 전송 실패: 권한 확인 필요)"
-        else:
-            api_result_msg = "\n(🔒 카톡 미전송: OAuth 로그인이 필요합니다)"
 
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -489,7 +441,7 @@ async def handle_mcp_post(request: Request):
                 "content": [
                     {
                         "type": "text",
-                        "text": f"🎨 t3xtart 결과{api_result_msg}\n\n{full_message}"
+                        "text": full_message 
                     }
                 ]
             }

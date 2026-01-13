@@ -58,11 +58,15 @@ async def send_kakao(user_token: str, content: str):
     
     try:
         res = requests.post(url, headers=headers, data=payload, timeout=5)
+        
+        # [디버깅] 성공이 아닐 경우, 에러 내용(JSON)을 로그에 찍습니다.
         if res.status_code != 200:
-            logger.error(f"Kakao API Error: {res.status_code} - {res.text}")
+            logger.error(f"❌ 카카오 전송 실패! 상태코드: {res.status_code}")
+            logger.error(f"❌ 에러 메시지: {res.text}")
+            
         return res.status_code == 200
     except Exception as e:
-        logger.error(f"Kakao Send Error: {e}")
+        logger.error(f"❌ 요청 중 예외 발생: {e}")
         return False
 
 

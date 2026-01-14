@@ -407,53 +407,28 @@ async def handle_mcp_post(request: Request):
 
         user_request = args.get("user_request", "")
         variations = args.get("variations", [])
-        single_art_lines = args.get("art_lines", [])
-        single_description = args.get("description", "Art")
 
         final_content = []
 
-        # -------------------------
-        # 1) Variation mode (여러 개)
-        # -------------------------
-        if variations:
-            for idx, item in enumerate(variations):
-                desc = item.get("description", "Art")
-                lines = item.get("art_lines", [])
-        
-                if isinstance(lines, list):
-                    raw_art = "\n".join(lines)
-                else:
-                    raw_art = str(lines)
-        
-                clean_art = clean_text(raw_art)
-                safe_art = truncate_art(clean_art, max_lines=150)
-        
-                if not safe_art.strip():
-                    safe_art = "(아트 생성 실패)"
-        
-                header = f"🎨 Ver {idx+1}. {desc}" if len(variations) > 1 else f"🎨 {desc}"
-                final_content.append(f"{header}\n{safe_art}")
-        
-        # -------------------------
-        # 2) Single-art mode (하나만)
-        # -------------------------
-        elif single_art_lines:
-            if isinstance(single_art_lines, list):
-                raw_art = "\n".join(single_art_lines)
-            else:
-                raw_art = str(single_art_lines)
-        
+        for idx, item in enumerate(variations):
+            desc = item.get("description", "Art")
+            lines = item.get("art_lines", [])
+
+            if isinstance(lines, list): raw_art = "\n".join(lines)
+            else: raw_art = str(lines)
+
             clean_art = clean_text(raw_art)
             safe_art = truncate_art(clean_art, max_lines=150)
-        
-            header = f"🎨 {single_description}"
+
+            if not safe_art.strip(): safe_art = "(아트 생성 실패)"
+
+            # 여러 개일 때만 번호 붙이기, 하나면 그냥 출력
+            if len(variations) > 1:
+                header = f"🎨 Ver {idx+1}. {desc}"
+            else:
+                header = f"🎨 {desc}"
+
             final_content.append(f"{header}\n{safe_art}")
-        
-        # -------------------------
-        # 3) 아무 것도 없으면 에러 메시지
-        # -------------------------
-        else:
-            final_content.append("생성된 결과가 없습니다.")
 
         full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
         if not full_message.strip(): full_message = "생성된 결과가 없습니다."

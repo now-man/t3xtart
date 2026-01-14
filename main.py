@@ -166,6 +166,16 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 
 ---
 
+[CRITICAL TERMINOLOGY MAPPING]
+If user asks for:
+- "도트 아트" (Dot Art)
+- "픽셀 아트" (Pixel Art)
+- "그리드 아트" (Grid Art)
+👉 YOU MUST CHOOSE **STYLE 2** (Emoji Pixel Art).
+👉 NEVER use Style 4 (ASCII) for these requests.
+
+---
+
 [CRITICAL RULES FOR RECTANGULAR GRID]
 1. 🧱 FILL THE VOID: Do NOT stop drawing in the middle of a line.
    - ❌ BAD (Jagged):
@@ -303,6 +313,7 @@ Output must be plain text only.
 PLANNING_PROMPT = """
 Before generating the `art_lines`, explain your plan in `design_plan`:
 1. Selected Style: (1, 2, 3, or 4)
+ +) User Keyword Analysis: Did user say "Dot" or "Pixel"? -> If yes, Force Style 2.
 2. Palette/Char:
    - If Style 4: Which creative Unicode symbols or blocks will you use? (e.g., "Use ▓ for battery level", "Use ᘏ for ears")
 3. Geometry: How will you draw the shape?

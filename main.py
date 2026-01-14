@@ -65,6 +65,15 @@ MASTER_INSTRUCTION = """
 [YOUR TASK]
 Choose ONE style from the 4 categories below based on the user's request and generate the art string.
 
+[🚨 CRITICAL TERMINOLOGY MAPPING - READ FIRST]
+If the user asks for:
+- "도트 아트" (Dot Art)
+- "픽셀 아트" (Pixel Art)
+- "그리드 아트" (Grid Art)
+👉 YOU MUST CHOOSE STYLE 2 (Emoji Blocks).
+👉 "Dot Art" means using Colored Squares (🟩🟨) or Emoji(🌊❤️), NOT text characters (. o O).
+👉 NEVER use Style 4 for Dot/Pixel requests.
+
 ---
 ### 1. 한 줄 이모지 아트 (Simple Line)
 - Strategy: Combine emojis to represent a concept in one line.
@@ -72,7 +81,7 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 - Ex: "Grass Monkey" -> 🌿🐒
 - Ex: "Love Meat" -> 🧑❤️🍖
 
-### 2. 여러 줄 이모지 아트 (Pixel Grid Art) ; 도트 아트 ; 픽셀 아트 ; 그리드 아트
+### 2. 여러 줄 이모지 아트 [DOT/PIXEL] Emoji Grid Art ; 도트 아트 ; 픽셀 아트 ; 그리드 아트
 - Strategy: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) to draw the shape.
 - CRITICAL RULE: Differentiate Subject vs Background. Use Negative Space.
 - "도트 아트"나 "픽셀 아트"를 사용자가 요청하면 "여러 줄 이모지 아트"를 요청한 것으로 취급함.

@@ -56,6 +56,27 @@ def truncate_art(text: str, max_lines: int = 150) -> str:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
     return text
 
+def normalize_style_keywords(text: str) -> str:
+    if not text:
+        return text
+    
+    # 픽셀/도트는 모두 Style 2로 정규화
+    patterns = [
+        r"픽셀\s*아트",
+        r"도트\s*아트",
+        r"픽셀",
+        r"도트",
+        r"그리드",
+        r"그리드\s*아트",
+        r"pixel\s*art",
+        r"pixel"
+    ]
+
+    for p in patterns:
+        text = re.sub(p, "여러 줄 이모지 아트", text, flags=re.IGNORECASE)
+
+    return text
+
 # =========================================================
 # 🧠 MASTER PROMPT
 # =========================================================
@@ -180,7 +201,7 @@ If user asks for:
 - "도트 아트" (Dot Art)
 - "픽셀 아트" (Pixel Art)
 - "그리드 아트" (Grid Art)
-👉 YOU MUST CHOOSE **STYLE 2** (Emoji Pixel Art).
+👉 YOU MUST CHOOSE "여러 줄 이모지 아트 [DOT/PIXEL] Emoji Grid Art ; 도트 아트 ; 픽셀 아트 ; 그리드 아트"
 👉 NEVER use Style 4 (ASCII) for these requests.
 
 ---
@@ -332,6 +353,8 @@ Before generating the `art_lines`, explain your plan in `design_plan`:
 # 🚀 MCP Streamable HTTP Transport
 # =========================================================
 
+
+
 @app.get("/mcp")
 async def handle_mcp_get(request: Request):
     if not validate_origin(request):
@@ -436,6 +459,7 @@ async def handle_mcp_post(request: Request):
         args = params.get("arguments", {})
 
         user_request = args.get("user_request", "")
+        user_request = normalize_style_keywords(user_request)
 
         # [핵심 수정] variations가 있으면 그걸 쓰고, 없으면 art_lines(단일)를 쓴다.
         variations = args.get("variations", [])

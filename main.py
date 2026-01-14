@@ -32,13 +32,16 @@ def validate_origin(request: Request) -> bool:
     origin = request.headers.get("origin")
     if origin is None:
         return True
-    
+
     allowed = [
         "https://playmcp.kakao.com",   # PlayMCP
         "https://chat.openai.com",     # ChatGPT MCP
         "https://claude.ai",           # Claude MCP
     ]
+
     return origin in allowed or True
+
+# [삭제됨] send_kakao 함수 및 requests 의존성 제거
 
 # =========================================================
 # 🧹 데이터 정제
@@ -185,14 +188,9 @@ You MUST generate the Design Plan AND the Final Art in a SINGLE output string.
 Do not separate them into different arguments.
 
 [CRITICAL INSTRUCTION]
-1. If the user asks for ONE art:
-   - Put the result in the `art_lines` field.
-   - Leave `variations` empty.
-2. If the user asks for VARIETY ("여러 개", "후보", "다양하게", etc):
-   - Put 3-5 results in the `variations` list.
-   - Leave `art_lines` empty.
-3. Do NOT output the art in the chat window. Put it INSIDE the JSON list.
-4. `art_lines` is a LIST of strings, where each string is one row of the art.
+1. You MUST use the `art_lines` argument to output the art.
+2. Do NOT output the art in the chat window. Put it INSIDE the JSON list.
+3. `art_lines` is a LIST of strings, where each string is one row of the art.
 
 Choose the best style and generate ONLY the final art string.
 
@@ -214,7 +212,7 @@ IF Style 4 (ASCII/Unicode Art):
 
 You normally return ONLY ONE final art.
 
-However, enter Variation Mode and generate 3–5 candidates ONLY IF user explicitly asks for any of the following:
+However, enter **Variation Mode** and generate 3–5 candidates ONLY IF user explicitly asks for any of the following:
 
 - "여러 개"
 - "여러가지"
@@ -332,7 +330,7 @@ async def handle_mcp_get(request: Request):
 async def handle_mcp_post(request: Request):
     if not validate_origin(request):
         return Response(status_code=403)
-    
+
     try:
         body = await request.json()
     except:
@@ -354,7 +352,7 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "34.0-single-fix"
+                    "version": "1.0.0-clean"
                 }
             }
         })
@@ -380,16 +378,9 @@ async def handle_mcp_post(request: Request):
                                 "type": "string",
                                 "description": PLANNING_PROMPT
                             },
-                            # [수정] 단일 결과를 위한 art_lines 필드 추가
-                            "art_lines": {
-                                "type": "array",
-                                "description": "Single art result (List of strings). Use this for single requests.",
-                                "items": {"type": "string"}
-                            },
-                            # [유지] 다중 결과를 위한 variations 필드
                             "variations": {
                                 "type": "array",
-                                "description": "Multiple variations. Use this ONLY if user asks for variety.",
+                                "description": MASTER_INSTRUCTION,
                                 "items": {
                                     "type": "object",
                                     "properties": {
@@ -403,7 +394,7 @@ async def handle_mcp_post(request: Request):
                                 }
                             }
                         },
-                        "required": ["user_request", "design_plan"]
+                        "required": ["user_request", "design_plan", "variations"]
                     }
                 }]
             }
@@ -413,45 +404,34 @@ async def handle_mcp_post(request: Request):
     if method == "tools/call":
         params = body.get("params", {})
         args = params.get("arguments", {})
-        
+
         user_request = args.get("user_request", "")
-        
-        # [핵심 수정] variations가 있으면 그걸 쓰고, 없으면 art_lines(단일)를 쓴다.
         variations = args.get("variations", [])
-        single_art_lines = args.get("art_lines", [])
 
         final_content = []
 
-        # CASE A: 다중 생성 모드 (Variations)
-        if variations and len(variations) > 0:
-            for idx, item in enumerate(variations):
-                desc = item.get("description", "Art")
-                lines = item.get("art_lines", [])
-                
-                if isinstance(lines, list): raw_art = "\n".join(lines)
-                else: raw_art = str(lines)
-                
-                clean_art = clean_text(raw_art)
-                safe_art = truncate_art(clean_art, max_lines=150)
-                
-                header = f"🎨 Ver {idx+1}. {desc}"
-                final_content.append(f"{header}\n{safe_art}")
-        
-        # CASE B: 단일 생성 모드 (Single Art)
-        elif single_art_lines:
-            if isinstance(single_art_lines, list): raw_art = "\n".join(single_art_lines)
-            else: raw_art = str(single_art_lines)
-            
+        for idx, item in enumerate(variations):
+            desc = item.get("description", "Art")
+            lines = item.get("art_lines", [])
+
+            if isinstance(lines, list): raw_art = "\n".join(lines)
+            else: raw_art = str(lines)
+
             clean_art = clean_text(raw_art)
             safe_art = truncate_art(clean_art, max_lines=150)
-            
-            # 단일 모드는 제목 없이 깔끔하게
-            final_content.append(f"🎨 {safe_art}")
+
+            if not safe_art.strip(): safe_art = "(아트 생성 실패)"
+
+            # 여러 개일 때만 번호 붙이기, 하나면 그냥 출력
+            if len(variations) > 1:
+                header = f"🎨 Ver {idx+1}. {desc}"
+            else:
+                header = f"🎨 {desc}"
+
+            final_content.append(f"{header}\n{safe_art}")
 
         full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
-        
-        if not full_message.strip(): 
-            full_message = "(人 > <,,) 아트를 그릴 수 없었어요.. 다시 시도해 주세요!"
+        if not full_message.strip(): full_message = "생성된 결과가 없습니다."
 
         logger.info(f"Request: {user_request}")
 
@@ -462,12 +442,12 @@ async def handle_mcp_post(request: Request):
                 "content": [
                     {
                         "type": "text",
-                        "text": full_message 
+                        "text": full_message
                     }
                 ]
             }
         })
-    
+
     if method == "ping":
         return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 

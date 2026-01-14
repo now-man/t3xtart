@@ -188,8 +188,11 @@ Do not separate them into different arguments.
 1. If the user asks for ONE art:
    - Put the result in the `art_lines` field.
    - Leave `variations` empty.
-2. Do NOT output the art in the chat window. Put it INSIDE the JSON list.
-3. `art_lines` is a LIST of strings, where each string is one row of the art.
+2. If the user asks for VARIETY ("여러 개", "후보", "다양하게", etc):
+   - Put 3-5 results in the `variations` list.
+   - Leave `art_lines` empty.
+3. Do NOT output the art in the chat window. Put it INSIDE the JSON list.
+4. `art_lines` is a LIST of strings, where each string is one row of the art.
 
 Choose the best style and generate ONLY the final art string.
 

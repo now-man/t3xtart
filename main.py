@@ -56,27 +56,6 @@ def truncate_art(text: str, max_lines: int = 150) -> str:
         return "\n".join(lines[:max_lines]) + "\n...(너무 길어서 잘림 ✂️)"
     return text
 
-def normalize_style_keywords(text: str) -> str:
-    if not text:
-        return text
-    
-    # 픽셀/도트는 모두 Style 2로 정규화
-    patterns = [
-        r"픽셀\s*아트",
-        r"도트\s*아트",
-        r"픽셀",
-        r"도트",
-        r"그리드",
-        r"그리드\s*아트",
-        r"pixel\s*art",
-        r"pixel"
-    ]
-
-    for p in patterns:
-        text = re.sub(p, "여러 줄 이모지 아트", text, flags=re.IGNORECASE)
-
-    return text
-
 # =========================================================
 # 🧠 MASTER PROMPT
 # =========================================================
@@ -94,6 +73,12 @@ If the user asks for:
 👉 YOU MUST CHOOSE STYLE 2 (Emoji Blocks).
 👉 "Dot Art" means using Colored Squares (🟩🟨) or Emoji(🌊❤️), NOT text characters (. o O).
 👉 NEVER use Style 4 for Dot/Pixel requests.
+👉 It does NOT mean "dots" or "periods" (.).
+
+❌ WRONG (Do NOT do this for Dot Art):
+. . . .
+. o . o
+(Using text characters)
 
 ---
 ### 1. 한 줄 이모지 아트 (Simple Line)
@@ -343,10 +328,11 @@ Output must be plain text only.
 PLANNING_PROMPT = """
 Before generating the `art_lines`, explain your plan in `design_plan`:
 1. Selected Style: (1, 2, 3, or 4)
- +) User Keyword Analysis: Did user say "Dot" or "Pixel"? -> If yes, Force Style 2.
-2. Palette/Char:
+2. Keyword Analysis: Does request contain "도트(Dot)" or "픽셀(Pixel)"?
+   -> IF YES: You MUST use Style 2 (Emoji Blocks). Usage of Style 4 is BANNED.
+3. Palette/Char:
    - If Style 4: Which creative Unicode symbols or blocks will you use? (e.g., "Use ▓ for battery level", "Use ᘏ for ears")
-3. Geometry: How will you draw the shape?
+4. Geometry: How will you draw the shape?
 """
 
 # =========================================================
@@ -459,7 +445,7 @@ async def handle_mcp_post(request: Request):
         args = params.get("arguments", {})
 
         user_request = args.get("user_request", "")
-        user_request = normalize_style_keywords(user_request)
+
 
         # [핵심 수정] variations가 있으면 그걸 쓰고, 없으면 art_lines(단일)를 쓴다.
         variations = args.get("variations", [])

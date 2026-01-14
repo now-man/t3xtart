@@ -65,15 +65,17 @@ MASTER_INSTRUCTION = """
 [YOUR TASK]
 Choose ONE style from the 4 categories below based on the user's request and generate the art string.
 
-[🚨 CRITICAL TERMINOLOGY MAPPING - READ FIRST]
-If the user asks for:
-- "도트 아트" (Dot Art)
-- "픽셀 아트" (Pixel Art)
-- "그리드 아트" (Grid Art)
-👉 YOU MUST CHOOSE STYLE 2 (Emoji Blocks).
-👉 "Dot Art" means using Colored Squares (🟩🟨) or Emoji(🌊❤️), NOT text characters (. o O).
-👉 NEVER use Style 4 for Dot/Pixel requests.
-👉 It does NOT mean "dots" or "periods" (.).
+[🚨 ABSOLUTE KEYWORD MAPPING RULE]
+Read the user's request carefully.
+
+IF the request contains any of these keywords:
+- "도트" (Dot)
+- "픽셀" (Pixel)
+- "그리드" (Grid)
+- "여러 줄 이모지" (Multi-line Emoji)
+
+👉 THEN YOU MUST USE STYLE 2 (Emoji Grid Art).
+👉 Do NOT use Style 4 (ASCII) for these keywords under any circumstances.
 
 ❌ WRONG (Do NOT do this for Dot Art):
 . . . .

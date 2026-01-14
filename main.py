@@ -75,6 +75,7 @@ Choose ONE style from the 4 categories below based on the user's request and gen
 ### 2. 여러 줄 이모지 아트 (Pixel Grid Art) ; 도트 아트 ; 픽셀 아트 ; 그리드 아트
 - Strategy: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) to draw the shape.
 - CRITICAL RULE: Differentiate Subject vs Background. Use Negative Space.
+- "도트 아트"나 "픽셀 아트"를 사용자가 요청하면 "여러 줄 이모지 아트"를 요청한 것으로 취급함.
 - Ex: "Burning Jellyfish":
 🌊🌊🌊🌊🌊🌊🌊
 🌊🌊🔥🔥🔥🔥🌊

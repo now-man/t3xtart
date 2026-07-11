@@ -25,20 +25,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================================================
-# Security: Origin Validation
-# =========================================================
 def validate_origin(request: Request) -> bool:
-    origin = request.headers.get("origin")
-    if origin is None:
-        return True
-
-    allowed = [
-        "https://playmcp.kakao.com",   # PlayMCP
-        "https://chat.openai.com",     # ChatGPT MCP
-        "https://claude.ai",           # Claude MCP
-    ]
-    return origin in allowed or True
+    return True 
 
 # =========================================================
 # 🧹 데이터 정제
@@ -57,13 +45,10 @@ def truncate_art(text: str, max_lines: int = 150) -> str:
     return text
 
 # =========================================================
-# 🧠 MASTER PROMPT
+# 🧠 MASTER PROMPT (SyntaxWarning 해결을 위해 r""" 사용)
 # =========================================================
-MASTER_INSTRUCTION = """
+MASTER_INSTRUCTION = r"""
 [ROLE] You are a Witty & High-Quality Text + Emoji Artist.
-
-[YOUR TASK]
-Choose ONE style from the 4 categories below based on the user's request and generate the art string.
 
 [🚨 ABSOLUTE KEYWORD MAPPING RULE]
 Read the user's request carefully.
@@ -74,274 +59,55 @@ IF the request contains any of these keywords:
 - "그리드" (Grid)
 - "여러 줄 이모지" (Multi-line Emoji)
 
-👉 THEN YOU MUST USE STYLE 2 (Emoji Grid Art).
-👉 Do NOT use Style 4 (ASCII) for these keywords under any circumstances.
-
-❌ WRONG (Do NOT do this for Dot Art):
-. . . .
-. o . o
-(Using text characters)
+👉 THEN YOU **MUST** USE **STYLE 2 (Emoji Grid Art)**.
+👉 Do **NOT** use Style 4 (ASCII) for these keywords under any circumstances.
 
 ---
-### 1. 한 줄 이모지 아트 (Simple Line)
-- Strategy: Combine emojis to represent a concept in one line.
+[STYLE DEFINITIONS]
+
+### 1. Simple Line (한 줄 이모지)
+- Strategy: One line of emojis.
 - Ex: "2026" -> 2️⃣0️⃣2️⃣6️⃣
-- Ex: "Grass Monkey" -> 🌿🐒
-- Ex: "Love Meat" -> 🧑❤️🍖
 
-### 2. 여러 줄 이모지 아트 [DOT/PIXEL] Emoji Grid Art ; 도트 아트 ; 픽셀 아트 ; 그리드 아트
-- Strategy: Use COLORED BLOCKS (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) to draw the shape.
-- CRITICAL RULE: Differentiate Subject vs Background. Use Negative Space.
-- "도트 아트"나 "픽셀 아트"를 사용자가 요청하면 "여러 줄 이모지 아트"를 요청한 것으로 취급함.
-- Ex: "Burning Jellyfish":
-🌊🌊🌊🌊🌊🌊🌊
-🌊🌊🔥🔥🔥🔥🌊
-🌊🔥👁️🔥👁️🔥🌊
-🌊🔥🔥👄🔥🔥🌊
-🌊⚡️⚡️⚡️⚡️⚡️🌊
-🌊⚡️🌊⚡️🌊⚡️🌊
-🌊🌊🌊🌊🌊🌊🌊
-- Ex: "Ramen" (Bowl + Noodles):
-⬛⬛⬛⬛⬛⬛⬛⬛⬛
-⬛⬛🍜🍜🍜🍜🍜⬛⬛
-⬛🍜🟨〰️〰️〰️🟨🍜⬛
-⬛🍜🍥🥚🍖🥚🍥🍜⬛
-⬛🍜🟨🟨🟨🟨🟨🍜⬛
-⬛⬛🍜🍜🍜🍜🍜⬛⬛
-⬛⬛⬛⬛⬛⬛⬛⬛⬛
-- Ex: "Snake in Grass" (Subject: Green Blocks, BG: Leaf):
-🌿🌿🌿🌿🌿🌿🌿🌿
-🌿🌿🟩🟩🟩🟩🌿🌿
-🌿🌿🌿🌿🌿🟩🌿🌿
-🌿🌿🟩🟩🟩🟩🌿🌿
-🌿🌿🟩🌿🌿🌿🌿🌿
-🌿🌿🟩🟩👀👅🌿🌿
-🌿🌿🌿🌿🌿🌿🌿🌿
-- Ex: "Earth" (Contrast BG):
-⬛⬛⬛🟦🟦🟦⬛⬛⬛
-⬛⬛🟦🟦🟩🟩🟦⬛⬛
-⬛🟦🟦🟩🟩🟩🟩🟦⬛
-⬛🟦🟦🟦🟩🟦🟦🟦⬛
-⬛🟩🟦🟦🟩🟩🟦🟦⬛
-⬛⬛🟦🟦🟩🟩🟦⬛⬛
-⬛⬛⬛🟦🟦🟦⬛⬛⬛
+### 2. Emoji Grid Art (도트/픽셀/여러줄 이모지)
+- **MANDATORY for keywords:** "도트", "픽셀", "그리드", "여러 줄"
+- **Materials:** ONLY use Emoji Blocks (🟩🟨🟧🟥🟦🟪🟫⬛️⬜️) or dense emojis.
+- **Strategy:** Create a rectangular grid, using background vs subject contrast.
+- **🚫 NO TEXT CHARACTERS:** Do not use `.`, `*`, `+` here.
 
-### 3. 카오모지 (Kaomoji) ; 한 줄 특수문자 아트; 간단한 이모티콘
+- Ex (Ramen):
+⬛⬛⬛⬛⬛⬛⬛
+⬛🍜🍜🍜🍜🍜⬛
+⬛🍜🍥🥚🍥🍜⬛
+⬛⬛⬛⬛⬛⬛⬛
+
+### 3. Kaomoji (카오모지)
 - Strategy: One-line special characters.
-- Ex: "Fighting" -> (ง •̀_•́)ง
-- Ex: "Running" -> (งᐖ)ว
-- Ex: "Sad" -> (｡•́︿•̀｡)
-- Ex: "Exhaustion with bread" -> (；・∀・)🍞💨
+- Ex: (ง •̀_•́)ง
 
-### 4. 아스키 아트 (ASCII / Unicode / Text Art); 특수기호, 유니코드를 이용한 중간 크기 이상의 아트
-- Target: "ASCII", "Unicode", "Creative Art"
-- Strategy:
-  - UNLOCK ALL CHARACTERS: Use ANY Unicode symbol, geometric shape, Braille, or glyph to create the shape.
-  - Allowed: `/, \, |, _, (, ), @, #, %, &, *, +, =, <, >, ░, ▒, ▓, █, ▄, ▀, ■, ●, ◕, ᘏ, ^, 🎀(any emoji like 🎁, 🎂), ▦, 田, ╭, ╮, ╯, ╰`
-  - Creativity: Don't just use lines. Use shapes to represent objects.
-- CRITICAL RULE:
-  - Do NOT use colored background squares (⬛, ⬜). Use empty space or text blocks.
-  - Use '　' (Full-width space) for alignment.
-
-#### ✨ Creative ASCII Examples (Learn from these!):
-
-- Ex: "Cat Heart":
-˚∧＿∧   　+        —̳͟͞͞💗
-(  •‿• )つ  —̳͟͞͞ 💗
-(つ　 <                —̳͟͞͞💗
-｜　 _つ      +  —̳͟͞͞💗
-`し´
-- Ex: "Jindo dog"
-　 ／＞　 フ
-　| 　_　_|
-／ ミ＿xノ
-/　　　　 |
-/　 ヽ　　 ﾉ
-│　　|　|　|
-／￣|　　 |　|
-(￣ヽ＿_ヽ_)__)
-＼二)
-- Ex "House":
- ╱◥▦◣
-│  田 │
-
-- Ex "Volume" (Using Blocks `▄ █ ▓ ░`):
-   .ılı.——Volume——.ılı.
-     ▄ █ ▄ █ ▄ ▄ █ ▄ █ ▄ █
- Min- – – – – – – – – -●Max
-
-- Ex "Cute Bunny":
-|ᘏ⑅ᘏ  .🎀⸒⸒
-| ᴗ͈.ᴗ͈⸝⸝꒱"
-
-- Ex "Trapped":
-
-┏┯┯┯┯┯┓
-┃││∧ ∧│┃
-┃│  (≧Д≦) ┃
-┗┷┷┷┷┷┛
+### 4. ASCII / Text Art (아스키 아트)
+- **Keywords:** "아스키", "텍스트 아트", "ASCII"
+- **Materials:** Unicode text symbols (|, -, /, \, ░, ▒).
+- **⚠️ WARNING:** NEVER use this style if the user asked for "Dot" or "Pixel" art.
 
 ---
-
-[CRITICAL TERMINOLOGY MAPPING]
-If user asks for:
-- "도트 아트" (Dot Art)
-- "픽셀 아트" (Pixel Art)
-- "그리드 아트" (Grid Art)
-👉 YOU MUST CHOOSE "여러 줄 이모지 아트 [DOT/PIXEL] Emoji Grid Art ; 도트 아트 ; 픽셀 아트 ; 그리드 아트"
-👉 NEVER use Style 4 (ASCII) for these requests.
-
----
-
-[CRITICAL RULES FOR RECTANGULAR GRID]
-1. 🧱 FILL THE VOID: Do NOT stop drawing in the middle of a line.
-   - ❌ BAD (Jagged):
-     ❄️❄️❄️❄️
-     🏠🎄🏠
-     ⛄️⛄️
-   - ✅ GOOD (Rectangular):
-     ❄️❄️❄️❄️
-     🏠🎄🏠❄️ (Filled with Background)
-     ⛄️⛄️❄️❄️ (Filled with Background)
-2. 📐 EQUAL WIDTH: Every row MUST have the exact same number of emojis.
-3. 📏 ALIGNMENT: For ASCII/Box art, use '　' (Full-width space) for alignment.
-
-Choose the best style and generate ONLY the final art string.
-
-[YOUR GOAL]
-You MUST generate the Design Plan AND the Final Art in a SINGLE output string.
-Do not separate them into different arguments.
-
-[CRITICAL INSTRUCTION]
-1. If the user asks for ONE art:
-   - Put the result in the `art_lines` field.
-   - Leave `variations` empty.
-2. If the user asks for VARIETY ("여러 개", "후보", "다양하게", etc):
-   - Put 3-5 results in the `variations` list.
-   - Leave `art_lines` empty.
-3. Do NOT output the art in the chat window. Put it INSIDE the JSON list.
-4. `art_lines` is a LIST of strings, where each string is one row of the art.
-
-Choose the best style and generate ONLY the final art string.
-
----
-
-[RULES BY STYLE]
-IF Style 2 (Pixel Art):
-- 🧱 FILL THE VOID: Do NOT stop drawing in the middle. Fill with Background Emoji.
-
-IF Style 4 (ASCII/Unicode Art):
-- 🔓 USE DIVERSE SYMBOLS: Use `▓`, `▒`, `░` for shading (like battery). Use `▄`, `▀`, `█` for solid shapes. Use `ᘏ`, `◕` for cute faces.
-- 🚫 NO PIXEL SQUARES: Do NOT use `⬛` or `⬜`.
-
-[OUTPUT INSTRUCTION]
-- `design_plan`: Briefly explain your style, palette, and geometry.
-- `art_lines`: The actual art. Must be a JSON Array of strings.
-
-### 🔥 MULTI-VARIATION MODE (Important)
-
-You normally return ONLY ONE final art.
-
-However, enter Variation Mode and generate 3–5 candidates ONLY IF user explicitly asks for any of the following:
-
-- "여러 개"
-- "여러가지"
-- "여러 가지"
-- "후보"
-- "다양하게"
-- "몇 가지 버전"
-- "여러 버전"
-- "다른 스타일로도"
-- "여러 시도로"
-- "여러 후보를 보여줘"
-- "비교해서 고를게"
-- "골라볼 수 있게"
-- "많이"
-- "다르게"
-
-👉 Then DO THIS:
-
-1. Generate 3–5 different, more specific interpretations.
-2. For each interpretation:
-   - write a caption (1 line)
-   - generate a separate art block
-3. Combine all results in order.
-
-When in Variation Mode:
-
-1) DO NOT change expression type.
-   - If you chose Emoji Pixel Art → all candidates must be Emoji Pixel Art.
-   - If you chose ASCII Art → all must be ASCII Art.
-
-2) Each candidate must differ in:
-   - scene, layout, composition, subject action, or perspective
-   - NOT just tiny emoji swaps
-
-3) Each candidate MUST be formatted like:
-
-[제목1: 한글]
-<art 1>
-
-[제목2: 한글]
-<art 2>
-
-[제목3: 한글]
-<art 3>
-
-4) There MUST be exactly ONE empty line
-   between each block of art.
-
-5) Titles MUST be in Korean,
-   descriptive, e.g.:
-   - "잔디밭에서 활발히 경기를 하고 있는 축구장"
-   - "관객이 가득 찬 축구장"
-   - "비 오는 날의 축구장"
-   - "구름이 듬성듬성 있는 푸른 하늘 아래의 잔디밭 위 돌아다니는 선수들이 있는 축구장"
-
-6) Do NOT just change adjectives like “cute/sad/happy, Vary the SCENE itself.
-Generate 3–5 clearly different scenarios by changing:
-- background (sky, room, space, beach, forest)
-- action (running, sleeping, chasing, eating, playing)
-- viewpoint (top view, side view, close-up, far away)
-- interaction (with toy, butterfly, box, friends, food)
-- emoji set (⚽🏀🎣🪁🧶🦋🌙⭐🌧️)
-
-Rules:
-- Each art block must follow the same style constraints as above.
-- Emoji grid width must be consistent per block.
-- Avoid Markdown fences like ``` ... ```
-- Avoid surrounding brackets like [ ... ]
-- Each block separated by one blank line.
-
----
-
-### If user explicitly asks for "only one" drawing:
-→ DO NOT activate multi-variation mode.
-
-NEVER wrap the art or any emoji block inside:
-- triple backticks ```
-- square brackets [ ]
-- quotation marks
-
-Output must be plain text only.
-
+[OUTPUT FORMAT RULE]
+1. Put results in the `variations` list.
+2. Single request = **1 item** in list.
+3. Variety request = **3-5 items** in list.
+4. Each item needs `description` and `art_lines`.
 """
 
-PLANNING_PROMPT = """
-Before generating the `art_lines`, explain your plan in `design_plan`:
-1. Selected Style: (1, 2, 3, or 4)
-2. Keyword Analysis: Does request contain "도트(Dot)" or "픽셀(Pixel)"?
-   -> IF YES: You MUST use Style 2 (Emoji Blocks). Usage of Style 4 is BANNED.
-3. Palette/Char:
-   - If Style 4: Which creative Unicode symbols or blocks will you use? (e.g., "Use ▓ for battery level", "Use ᘏ for ears")
-4. Geometry: How will you draw the shape?
+PLANNING_PROMPT = r"""
+Before generating, explain your plan in `design_plan`:
+1. **Keyword Check:** Does the request have "도트", "픽셀", "그리드"? -> If YES, you MUST use Style 2.
+2. Selected Style: (Must match the keyword rule above)
+3. Palette/Geometry: Plan the drawing.
 """
 
 # =========================================================
 # 🚀 MCP Streamable HTTP Transport
 # =========================================================
-
-
 
 @app.get("/mcp")
 async def handle_mcp_get(request: Request):
@@ -359,12 +125,11 @@ async def handle_mcp_get(request: Request):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-
 @app.post("/mcp")
 async def handle_mcp_post(request: Request):
     if not validate_origin(request):
         return Response(status_code=403)
-
+    
     try:
         body = await request.json()
     except:
@@ -376,7 +141,6 @@ async def handle_mcp_post(request: Request):
     method = body.get("method")
     msg_id = body.get("id")
 
-    # 1) Initialize
     if method == "initialize":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -384,18 +148,13 @@ async def handle_mcp_post(request: Request):
             "result": {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {"tools": {}},
-                "serverInfo": {
-                    "name": "t3xtart",
-                    "version": "34.0-single-fix"
-                }
+                "serverInfo": {"name": "t3xtart", "version": "40.0-bulletproof"}
             }
         })
 
-    # 2) notifications/initialized
     if method == "notifications/initialized":
         return Response(status_code=200)
 
-    # 3) tools/list
     if method == "tools/list":
         return JSONResponse({
             "jsonrpc": "2.0",
@@ -408,27 +167,18 @@ async def handle_mcp_post(request: Request):
                         "type": "object",
                         "properties": {
                             "user_request": {"type": "string"},
-                            "design_plan": {
-                                "type": "string",
-                                "description": PLANNING_PROMPT
-                            },
-                            # [수정] 단일 결과를 위한 art_lines 필드 추가
-                            "art_lines": {
-                                "type": "array",
-                                "description": "Single art result (List of strings). Use this for single requests.",
-                                "items": {"type": "string"}
-                            },
-                            # [유지] 다중 결과를 위한 variations 필드
+                            "design_plan": {"type": "string", "description": PLANNING_PROMPT},
                             "variations": {
                                 "type": "array",
-                                "description": "Multiple variations. Use this ONLY if user asks for variety.",
+                                "description": "List of art variations. Must contain at least 1 item (even for single requests).",
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "description": {"type": "string"},
+                                        "description": {"type": "string", "description": "Title/Description of this art"},
                                         "art_lines": {
                                             "type": "array",
-                                            "items": {"type": "string"}
+                                            "items": {"type": "string"},
+                                            "description": "The art lines/grid"
                                         }
                                     },
                                     "required": ["description", "art_lines"]
@@ -441,69 +191,57 @@ async def handle_mcp_post(request: Request):
             }
         })
 
-    # 4) tools/call
     if method == "tools/call":
         params = body.get("params", {})
         args = params.get("arguments", {})
-
-        user_request = args.get("user_request", "")
-
-
-        # [핵심 수정] variations가 있으면 그걸 쓰고, 없으면 art_lines(단일)를 쓴다.
+        
+        # 🔥 디버그 로그 출력
+        logger.info(f"🔥 [DEBUG] Incoming Args: {json.dumps(args, ensure_ascii=False)}")
+        
+        # 🛡️ 방어 로직: AI가 스키마를 무시하고 최상단에 art_lines를 보낼 경우도 잡아냅니다.
         variations = args.get("variations", [])
-        single_art_lines = args.get("art_lines", [])
-
+        fallback_art_lines = args.get("art_lines", [])
+        
         final_content = []
 
-        # CASE A: 다중 생성 모드 (Variations)
         if variations and len(variations) > 0:
             for idx, item in enumerate(variations):
                 desc = item.get("description", "Art")
                 lines = item.get("art_lines", [])
-
+                
                 if isinstance(lines, list): raw_art = "\n".join(lines)
                 else: raw_art = str(lines)
-
+                
                 clean_art = clean_text(raw_art)
                 safe_art = truncate_art(clean_art, max_lines=150)
-
-                header = f"🎨 Ver {idx+1}. {desc}"
+                
+                if not safe_art.strip(): safe_art = "(아트 생성 실패)"
+                
+                header = f"🎨 Ver {idx+1}. {desc}" if len(variations) > 1 else f"🎨 {desc}"
                 final_content.append(f"{header}\n{safe_art}")
-
-        # CASE B: 단일 생성 모드 (Single Art)
-        elif single_art_lines:
-            if isinstance(single_art_lines, list): raw_art = "\n".join(single_art_lines)
-            else: raw_art = str(single_art_lines)
-
+                
+        elif fallback_art_lines:
+            # AI가 variations 규칙을 어기고 단일 결과로 보낸 경우
+            if isinstance(fallback_art_lines, list): raw_art = "\n".join(fallback_art_lines)
+            else: raw_art = str(fallback_art_lines)
+            
             clean_art = clean_text(raw_art)
             safe_art = truncate_art(clean_art, max_lines=150)
-
-            # 단일 모드는 제목 없이 깔끔하게
-            final_content.append(f"🎨 {safe_art}")
+            final_content.append(f"🎨 생성된 아트:\n{safe_art}")
 
         full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
-
-        if not full_message.strip():
+        
+        if not full_message.strip(): 
             full_message = "(人 > <,,) 아트를 그릴 수 없었어요.. 다시 시도해 주세요!"
-
-        logger.info(f"Request: {user_request}")
 
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": msg_id,
             "result": {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": full_message
-                    }
-                ]
+                "content": [{"type": "text", "text": full_message}]
             }
         })
-
-    if method == "ping":
-        return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
-
+    
     return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 
 @app.get("/")

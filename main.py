@@ -84,6 +84,11 @@ You MUST generate art in one of these four explicit formats:
    🍜🌿🌿🌿🍜
    🍜🍜🍜🍜🍜
 
+   Ex2:
+   🟦🟦☁️🟦🟦🟦☁️🟦
+   🟦☁️🟦🟦☁️🟦🟦☁️
+   🥅⚽🏃🟩🏃🟩🟩🥅
+
 3. 한 줄 특수문자 아트 (Kaomoji)
    Ex: (；・∀・)🍞💨
 

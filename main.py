@@ -9,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 
+# Supabase 라이브러리 추가
+from supabase import create_client, Client
+
 # =========================================================
 # 기본 설정
 # =========================================================
@@ -29,22 +32,21 @@ def validate_origin(request: Request) -> bool:
     return True 
 
 # =========================================================
-# 💾 나만의 이모지 아트 DB (파일 기반 저장소)
+# ☁️ Supabase 클라우드 DB 설정
 # =========================================================
-MY_ART_DB_FILE = "my_art_db.json"
+# 환경 변수에서 URL과 KEY를 가져옵니다. (없으면 오류 방지를 위해 None 처리)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-def load_arts():
-    if os.path.exists(MY_ART_DB_FILE):
-        try:
-            with open(MY_ART_DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_arts(data):
-    with open(MY_ART_DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+supabase: Client | None = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("✅ Supabase DB 연결 성공!")
+    except Exception as e:
+        logger.error(f"❌ Supabase 연결 실패: {e}")
+else:
+    logger.warning("⚠️ SUPABASE_URL 또는 SUPABASE_KEY 환경 변수가 설정되지 않았습니다.")
 
 # =========================================================
 # 🧹 데이터 정제
@@ -63,7 +65,7 @@ def truncate_art(text: str, max_lines: int = 150) -> str:
     return text
 
 # =========================================================
-# 🧠 MASTER PROMPT
+# 🧠 MASTER PROMPT (v54.0)
 # =========================================================
 MASTER_INSTRUCTION = r"""
 # ROLE
@@ -164,7 +166,7 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "53.0-memory-expansion"
+                    "version": "54.0-supabase-cloud"
                 }
             }
         })
@@ -180,7 +182,7 @@ async def handle_mcp_post(request: Request):
                 "tools": [
                     {
                         "name": "render_and_send",
-                        "description": "💬사용자의 명령을 분석하여 4가지 타입(한 줄/여러 줄 이모지, 카오모지, 아스키 아트) 중 하나로 아트를 생성합니다.",
+                        "description": "💬사용자의 명령을 분석하여 4가지 타입 중 하나로 아트를 생성합니다.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -189,7 +191,7 @@ async def handle_mcp_post(request: Request):
                                     "type": "object",
                                     "properties": {
                                         "subject": {"type": "string"},
-                                        "style": {"type": "string", "description": "Choose from: 1.한줄이모지, 2.여러줄이모지, 3.한줄특수문자, 4.여러줄특수문자"},
+                                        "style": {"type": "string"},
                                         "view": {"type": "string"},
                                         "scene": {"type": "string"},
                                         "mood": {"type": "string"},
@@ -212,10 +214,7 @@ async def handle_mcp_post(request: Request):
                                     "items": {
                                         "type": "object",
                                         "properties": {
-                                            "title": {
-                                                "type": "string", 
-                                                "description": "아트의 제목. 무조건 한국어로 직관적이고 짧게 작성 (예: 나무, 비오는 축구장, 눈치 빠른 고양이)"
-                                            },
+                                            "title": {"type": "string", "description": "직관적인 한국어 단어 (예: 나무)"},
                                             "theme": {"type": "string"},
                                             "estimated_width": {"type": "integer"},
                                             "estimated_height": {"type": "integer"},
@@ -233,46 +232,26 @@ async def handle_mcp_post(request: Request):
                     },
                     {
                         "name": "manage_my_art",
-                        "description": "💾 마음에 드는 이모지/아스키 아트를 저장하거나, 보관함을 조회하는 기억(Memory) 도구입니다.",
+                        "description": "💾 마음에 드는 아트를 클라우드에 영구 저장하거나 목록을 조회합니다.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "action": {
-                                    "type": "string", 
-                                    "enum": ["save", "list", "view"],
-                                    "description": "'save'는 아트 저장, 'list'는 저장된 목록 확인, 'view'는 특정 아트 불러오기"
-                                },
-                                "user_key": {
-                                    "type": "string", 
-                                    "description": "사용자 닉네임 (개인 보관함 구분용)"
-                                },
-                                "title": {
-                                    "type": "string",
-                                    "description": "저장하거나 불러올 아트의 제목 (한국어 권장)"
-                                },
-                                "art_lines": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "저장할 아트의 내용 (action이 'save'일 때만 필요)"
-                                }
+                                "action": {"type": "string", "enum": ["save", "list", "view"]},
+                                "user_key": {"type": "string", "description": "사용자 닉네임"},
+                                "title": {"type": "string"},
+                                "art_lines": {"type": "array", "items": {"type": "string"}}
                             },
                             "required": ["action", "user_key"]
                         }
                     },
                     {
                         "name": "delete_my_art",
-                        "description": "🗑️ 저장된 나만의 이모지 아트를 보관함에서 영구 삭제합니다.",
+                        "description": "🗑️ 클라우드에 저장된 내 아트를 영구 삭제합니다.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "user_key": {
-                                    "type": "string", 
-                                    "description": "사용자 닉네임"
-                                },
-                                "title": {
-                                    "type": "string",
-                                    "description": "삭제할 아트의 정확한 제목"
-                                }
+                                "user_key": {"type": "string"},
+                                "title": {"type": "string"}
                             },
                             "required": ["user_key", "title"]
                         }
@@ -286,6 +265,14 @@ async def handle_mcp_post(request: Request):
         args = params.get("arguments", {})
         tool_name = params.get("name")
         
+        # [공통 에러 핸들링] DB 연결 확인
+        if tool_name in ["manage_my_art", "delete_my_art"] and supabase is None:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {"content": [{"type": "text", "text": "🚨 클라우드 DB가 연결되지 않았습니다. Render 환경 변수(SUPABASE_URL, SUPABASE_KEY)를 확인해주세요."}]}
+            })
+
         # ==========================================
         # TOOL 1: 🎨 렌더링 툴
         # ==========================================
@@ -304,10 +291,8 @@ async def handle_mcp_post(request: Request):
                     h = item.get("estimated_height", "?")
                     lines = item.get("art_lines", [])
 
-                    if isinstance(lines, list): 
-                        raw_art = "\n".join(lines)
-                    else: 
-                        raw_art = str(lines)
+                    if isinstance(lines, list): raw_art = "\n".join(lines)
+                    else: raw_art = str(lines)
 
                     clean_art = clean_text(raw_art)
                     safe_art = truncate_art(clean_art, max_lines=150)
@@ -318,15 +303,10 @@ async def handle_mcp_post(request: Request):
                 final_content.append("(人 > <,,) 아트를 그릴 수 없었어요..")
 
             full_message = "\n\n━━━━━━━━━━━━━━\n\n".join(final_content)
-
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {"content": [{"type": "text", "text": full_message}]}
-            })
+            return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": full_message}]}})
             
         # ==========================================
-        # TOOL 2: 💾 나만의 아트 보관함 툴
+        # TOOL 2: 💾 나만의 아트 보관함 툴 (Supabase 연동)
         # ==========================================
         elif tool_name == "manage_my_art":
             action = args.get("action")
@@ -334,65 +314,61 @@ async def handle_mcp_post(request: Request):
             title = args.get("title", "무제")
             art_lines = args.get("art_lines", [])
             
-            logger.info(f"💾 [MEMORY] Action: {action}, User: {user_key}, Title: {title}")
-
-            db = load_arts()
-            if user_key not in db:
-                db[user_key] = {}
-
-            if action == "save":
-                if not art_lines:
-                    msg = "❌ 저장할 아트 내용(art_lines)이 없습니다."
+            try:
+                if action == "save":
+                    if not art_lines:
+                        msg = "❌ 저장할 아트 내용이 없습니다."
+                    else:
+                        # 1. 동일한 제목이 있는지 확인하고 삭제 (Upsert 효과)
+                        supabase.table("saved_arts").delete().eq("user_key", user_key).eq("title", title).execute()
+                        # 2. 새 데이터 삽입
+                        supabase.table("saved_arts").insert({"user_key": user_key, "title": title, "art_lines": art_lines}).execute()
+                        msg = f"☁️✅ '{title}'이(가) 클라우드 보관함에 영구 저장되었습니다!"
+                
+                elif action == "list":
+                    response = supabase.table("saved_arts").select("title").eq("user_key", user_key).execute()
+                    data = response.data
+                    if data:
+                        msg = f"☁️📂 {user_key}님의 클라우드 보관함:\n" + "\n".join([f"- {item['title']}" for item in data])
+                    else:
+                        msg = f"☁️📂 {user_key}님의 클라우드 보관함이 비어있습니다."
+                
+                elif action == "view":
+                    response = supabase.table("saved_arts").select("art_lines").eq("user_key", user_key).eq("title", title).execute()
+                    data = response.data
+                    if data:
+                        lines = data[0]['art_lines']
+                        art_str = "\n".join(lines) if isinstance(lines, list) else str(lines)
+                        msg = f"☁️🎨 보관함에서 꺼낸 '{title}'\n\n{art_str}"
+                    else:
+                        msg = f"❌ '{title}' 아트를 찾을 수 없습니다."
                 else:
-                    db[user_key][title] = art_lines
-                    save_arts(db)
-                    msg = f"✅ 나만의 이모지 아트 '{title}'이(가) {user_key}님의 보관함에 성공적으로 저장되었습니다!"
-            
-            elif action == "list":
-                saved_titles = list(db[user_key].keys())
-                if saved_titles:
-                    msg = f"📂 {user_key}님의 보관함 목록:\n" + "\n".join([f"- {t}" for t in saved_titles])
-                else:
-                    msg = f"📂 {user_key}님의 보관함이 비어있습니다. 새로운 아트를 저장해보세요!"
-            
-            elif action == "view":
-                if title in db[user_key]:
-                    lines = db[user_key][title]
-                    art_str = "\n".join(lines) if isinstance(lines, list) else str(lines)
-                    msg = f"🎨 보관함에서 꺼낸 '{title}'\n\n{art_str}"
-                else:
-                    msg = f"❌ '{title}' 아트를 보관함에서 찾을 수 없습니다. 목록을 먼저 확인해주세요."
-            else:
-                msg = "지원하지 않는 액션입니다."
+                    msg = "지원하지 않는 액션입니다."
+            except Exception as e:
+                logger.error(f"DB Error: {e}")
+                msg = "🚨 클라우드 DB 처리 중 오류가 발생했습니다."
 
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {"content": [{"type": "text", "text": msg}]}
-            })
+            return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": msg}]}})
             
         # ==========================================
-        # TOOL 3: 🗑️ 삭제 툴
+        # TOOL 3: 🗑️ 삭제 툴 (Supabase 연동)
         # ==========================================
         elif tool_name == "delete_my_art":
             user_key = args.get("user_key", "default_user")
             title = args.get("title", "")
             
-            logger.info(f"🗑️ [DELETE] User: {user_key}, Title: {title}")
-            
-            db = load_arts()
-            if user_key in db and title in db[user_key]:
-                del db[user_key][title]
-                save_arts(db)
-                msg = f"🗑️ '{title}' 아트가 보관함에서 성공적으로 삭제되었습니다."
-            else:
-                msg = f"❌ '{title}' 아트를 찾을 수 없습니다. 정확한 제목을 확인해주세요."
+            try:
+                response = supabase.table("saved_arts").delete().eq("user_key", user_key).eq("title", title).execute()
+                # Supabase의 delete()는 해당 조건의 데이터가 지워지면 data 배열에 담아 반환함
+                if response.data:
+                    msg = f"☁️🗑️ '{title}' 아트가 클라우드에서 영구 삭제되었습니다."
+                else:
+                    msg = f"❌ '{title}' 아트를 찾을 수 없어 삭제하지 못했습니다."
+            except Exception as e:
+                logger.error(f"DB Error: {e}")
+                msg = "🚨 클라우드 DB 삭제 처리 중 오류가 발생했습니다."
                 
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {"content": [{"type": "text", "text": msg}]}
-            })
+            return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": msg}]}})
 
     if method == "ping":
         return JSONResponse({"jsonrpc": "2.0", "id": msg_id, "result": {}})

@@ -42,59 +42,68 @@ def truncate_art(text: str, max_lines: int = 150) -> str:
     return text
 
 # =========================================================
-# 🧠 MASTER PROMPT (v45.0 - Matrix Blueprint Renderer)
+# 🧠 MASTER PROMPT (v46.0 - Diorama Masterpiece ONLY)
 # =========================================================
 MASTER_INSTRUCTION = r"""
-[ROLE] 
-You are an elite Text & Emoji Grid Renderer. You do not just throw random emojis; you meticulously calculate and build strict 2D rectangular matrices (Canvas).
+[ROLE]
+You are a Master Emoji Diorama Artist. Your ONLY job is to create breathtaking, multi-layered "Emoji Dioramas" (3D-like scenes built with text and emojis). You DO NOT create simple lines or plain grids. You create THEATER SCENES.
 
-[🚨 ABSOLUTE KEYWORD MAPPING RULE]
-IF the request contains: "도트" (Dot), "픽셀" (Pixel), "그리드" (Grid), or implies a scene:
-👉 YOU MUST USE STYLE 2 (Emoji Canvas). Never use ASCII for these keywords.
+[THE DIORAMA BLUEPRINT - STRICT STRUCTURE]
+Every single art piece you generate MUST follow this exact vertical structure:
 
----
-[STYLE 2: THE EMOJI CANVAS (STRICT RULES)]
-1. MUST BE A PERFECT RECTANGLE: Every row MUST have the exact same number of emojis.
-2. HUGE SCALE: Canvas must be at least Width: 10, Height: 8.
-3. BACKGROUND FIRST: Never leave empty spaces. Use blocks like ⬛, ⬜, 🟦, 🟩, or environmental emojis (☁️, 🌌, 🌧️) to fill the background completely.
-4. THEMATIC PAINTING: Treat emojis as pixels. 
+1. [Sky/Ceiling Layer]: 2-3 lines of weather, stars, ceiling lights, or effects above the frame.
+2. [Top Frame]: Box drawing characters (e.g., ╭────────────────────────────╮)
+3. [Stage/Action Layer]: 5-7 lines INSIDE the frame. Use block emojis (🟩, ⬛, 🟫) for the floor/walls, mixed with characters/objects (🧍, ⚽, 🔥). Include left/right frame borders (│).
+4. [Bottom Frame]: Box drawing characters (e.g., ╰────────────────────────────╯)
+5. [Ground/Spill Layer]: 1-2 lines of reflections, puddles, or roots spilling outside the bottom frame.
 
-[EXAMPLE OF HIGH-QUALITY EMOJI CANVAS (Rainy Soccer Field)]
-Notice the perfect 12x8 grid and rich environment:
-⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
-⬛🌧️⬛🌧️⬛🌧️⬛🌧️⬛🌧️⬛🌧️
-⬛⬛☁️☁️☁️⬛⬛☁️☁️⬛⬛⬛
-🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️
-🟩🟩🟩🟩⚽🟩🟩🟩🟩🟩🟩🟩
-🟩🏃‍♂️🟩🟩🟩🟩🟩🟩🏃‍♂️🟩🟩🟩
-🟩🟩🟩🟩🟩🏃‍♂️🟩🟩🟩🟩🟩🟩
-⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜
+[EXAMPLE 1: Rainy Soccer Field]
+                    ⚡
+           ☁️☁️☁️☁️☁️☁️
+      🌧️🌧️🌧️🌧️🌧️🌧️🌧️🌧️
+   💧💧💧💧💧💧💧💧💧💧💧💧
 
-[STYLE 4: ASCII MASTERPIECE (STRICT RULES)]
-- Use advanced blocks (`█`, `▓`, `▒`, `░`, `▄`, `▀`) to draw detailed scenes.
-- Align perfectly using spaces.
+       💡                     💡
+    ╭────────────────────────────╮
+    │🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩│
+    │🟩      🧍      ⚽      🟩│
+    │🟩                    💦  🟩│
+    │🟩───────◯──────────🟩│
+    │🟩   💦          🧍    🟩│
+    │🟩         🥅🧤         🟩│
+    │🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩│
+    ╰────────────────────────────╯
+      💦💦💦💦💦💦💦💦💦💦
+
+[EXAMPLE 2: Cozy Night Camping]
+         ✨       ⭐       ✨
+    🌌🌌🌌🌌🌌🌌🌌🌌🌌🌌🌌🌌
+           🌙
+    ╭────────────────────────────╮
+    │⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛│
+    │⬛      🌲      🦉      ⬛│
+    │⬛   ⛺                 ⬛│
+    │⬛          🔥  🧍‍♂️      ⬛│
+    │🟫🟫🟫🟫🟫🟫🟫🟫🟫🟫🟫│
+    ╰────────────────────────────╯
+         🍂      🍂    🍂
+
+[CRITICAL RULES FOR THE AI]
+- NEVER output just a square of emojis. You MUST use the `╭─╮` and `│` framing technique.
+- SPACINGS: Use regular spaces (` `) to position emojis inside the frame to create depth and negative space. Do not cram everything together.
+- BORDERS: The left `│` and right `│` must align perfectly on every line of the Stage Layer.
 
 [OUTPUT FORMAT]
-- Put results in the `variations` list.
-- Single request = 1 item.
+- Always put your final art in the `variations` list. (Even for a single request, put 1 item in the list).
 """
 
 PLANNING_PROMPT = r"""
-[CRITICAL] You MUST plan the 2D matrix row-by-row before outputting the final JSON. 
-Write your blueprint in `design_plan` EXACTLY following this format:
-
-1. Keyword Match: (e.g., '도트' found -> Style 2 Emoji Grid)
-2. Canvas Size: Width X, Height Y (Must be at least 10x8 for scenes)
-3. Palette: (Background: ⬛, Ground: 🟩, Object: ⚽, etc.)
-4. ROW-BY-ROW BLUEPRINT (Draw it out!):
-R1: ⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
-R2: ⬛🌧️⬛🌧️⬛🌧️⬛🌧️⬛🌧️
-R3: ⬛⬛☁️☁️☁️⬛⬛☁️☁️⬛
-R4: 🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️🏟️
-R5: 🟩🟩🟩🟩⚽🟩🟩🟩🟩🟩
-...
-
-I PLEDGE to strictly follow this blueprint and ensure every row has exactly the same width. I will not generate sparse or lazy art.
+Before drawing, you MUST plan the Diorama layers in `design_plan` to ensure perfection:
+1. Concept: (Briefly describe the scene)
+2. Sky Layer Palette: (e.g., ☁️, ⚡, 💧)
+3. Stage Layer Palette: (Background: 🟩, Objects: 🧍, ⚽)
+4. Ground Layer Palette: (e.g., 💦)
+👉 "I pledge to use the ╭───╮ frame structure and create a masterpiece Diorama."
 """
 
 # =========================================================
@@ -142,7 +151,7 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "45.0-matrix-renderer"
+                    "version": "46.0-diorama-master"
                 }
             }
         })
@@ -157,7 +166,7 @@ async def handle_mcp_post(request: Request):
             "result": {
                 "tools": [{
                     "name": "render_and_send",
-                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지/ASCII 아트를 생성합니다.",
+                    "description": "💬사용자의 명령을 분석하여 창의적인 🎨이모지 디오라마 아트를 생성합니다.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -193,7 +202,7 @@ async def handle_mcp_post(request: Request):
         args = params.get("arguments", {})
 
         user_request = args.get("user_request", "")
-        logger.info(f"🔥 [DEBUG] Incoming Args: {json.dumps(args, ensure_ascii=False)}")
+        logger.info(f"🔥 [DEBUG] Request: {user_request}")
 
         variations = args.get("variations", [])
         fallback_art_lines = args.get("art_lines", [])

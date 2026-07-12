@@ -63,7 +63,7 @@ def truncate_art(text: str, max_lines: int = 150) -> str:
     return text
 
 # =========================================================
-# 🧠 MASTER PROMPT (v52.0)
+# 🧠 MASTER PROMPT
 # =========================================================
 MASTER_INSTRUCTION = r"""
 # ROLE
@@ -159,7 +159,7 @@ async def handle_mcp_post(request: Request):
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": "t3xtart",
-                    "version": "52.0-multi-tool"
+                    "version": "53.0-memory-expansion"
                 }
             }
         })
@@ -207,7 +207,10 @@ async def handle_mcp_post(request: Request):
                                     "items": {
                                         "type": "object",
                                         "properties": {
-                                            "title": {"type": "string"},
+                                            "title": {
+                                                "type": "string", 
+                                                "description": "아트의 제목. 무조건 한국어로 직관적이고 짧게 작성 (예: 나무, 비오는 축구장, 눈치 빠른 고양이)"
+                                            },
                                             "theme": {"type": "string"},
                                             "estimated_width": {"type": "integer"},
                                             "estimated_height": {"type": "integer"},
@@ -225,7 +228,7 @@ async def handle_mcp_post(request: Request):
                     },
                     {
                         "name": "manage_my_art",
-                        "description": "💾 마음에 드는 이모지/아스키 아트를 저장하거나, 사용자가 직접 입력한 아트를 보관하고 다시 불러오는 기억(Memory) 도구입니다.",
+                        "description": "💾 마음에 드는 이모지/아스키 아트를 저장하거나, 보관함을 조회하는 기억(Memory) 도구입니다.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -240,7 +243,7 @@ async def handle_mcp_post(request: Request):
                                 },
                                 "title": {
                                     "type": "string",
-                                    "description": "저장하거나 불러올 아트의 제목"
+                                    "description": "저장하거나 불러올 아트의 제목 (한국어 권장)"
                                 },
                                 "art_lines": {
                                     "type": "array",
@@ -249,6 +252,24 @@ async def handle_mcp_post(request: Request):
                                 }
                             },
                             "required": ["action", "user_key"]
+                        }
+                    },
+                    {
+                        "name": "delete_my_art",
+                        "description": "🗑️ 저장된 나만의 이모지 아트를 보관함에서 영구 삭제합니다.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "user_key": {
+                                    "type": "string", 
+                                    "description": "사용자 닉네임"
+                                },
+                                "title": {
+                                    "type": "string",
+                                    "description": "삭제할 아트의 정확한 제목"
+                                }
+                            },
+                            "required": ["user_key", "title"]
                         }
                     }
                 ]
@@ -272,8 +293,8 @@ async def handle_mcp_post(request: Request):
 
             if variations and isinstance(variations, list) and len(variations) > 0:
                 for idx, item in enumerate(variations):
-                    title = item.get("title", "Untitled")
-                    theme = item.get("theme", "Unknown Theme")
+                    title = item.get("title", "무제")
+                    theme = item.get("theme", "알 수 없는 테마")
                     w = item.get("estimated_width", "?")
                     h = item.get("estimated_height", "?")
                     lines = item.get("art_lines", [])
@@ -305,7 +326,7 @@ async def handle_mcp_post(request: Request):
         elif tool_name == "manage_my_art":
             action = args.get("action")
             user_key = args.get("user_key", "default_user")
-            title = args.get("title", "Untitled")
+            title = args.get("title", "무제")
             art_lines = args.get("art_lines", [])
             
             logger.info(f"💾 [MEMORY] Action: {action}, User: {user_key}, Title: {title}")
@@ -337,8 +358,31 @@ async def handle_mcp_post(request: Request):
                 else:
                     msg = f"❌ '{title}' 아트를 보관함에서 찾을 수 없습니다. 목록을 먼저 확인해주세요."
             else:
-                msg = "지원하지 않는 액션입니다. (save, list, view 중 하나를 선택하세요)"
+                msg = "지원하지 않는 액션입니다."
 
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {"content": [{"type": "text", "text": msg}]}
+            })
+            
+        # ==========================================
+        # TOOL 3: 🗑️ 삭제 툴
+        # ==========================================
+        elif tool_name == "delete_my_art":
+            user_key = args.get("user_key", "default_user")
+            title = args.get("title", "")
+            
+            logger.info(f"🗑️ [DELETE] User: {user_key}, Title: {title}")
+            
+            db = load_arts()
+            if user_key in db and title in db[user_key]:
+                del db[user_key][title]
+                save_arts(db)
+                msg = f"🗑️ '{title}' 아트가 보관함에서 성공적으로 삭제되었습니다."
+            else:
+                msg = f"❌ '{title}' 아트를 찾을 수 없습니다. 정확한 제목을 확인해주세요."
+                
             return JSONResponse({
                 "jsonrpc": "2.0",
                 "id": msg_id,
